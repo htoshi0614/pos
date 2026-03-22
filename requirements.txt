@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+openpyxl
+stripe
+httpx
+python-multipart
