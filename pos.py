@@ -769,6 +769,11 @@ try:
     app.include_router(_stripe_router)
 except Exception as e:
     print(f"[warn] stripe_service router: {e}")
+try:
+    from management import router as _mgmt_router
+    app.include_router(_mgmt_router)
+except Exception as e:
+    print(f"[warn] management router: {e}")
 
 # ======================= UI (/ui) 完全版（取消＆数量管理つき） =======================
 from fastapi.responses import HTMLResponse
@@ -878,11 +883,12 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
   <label style="display:flex;align-items:center;gap:6px;">
     <input id="editToggle" type="checkbox"> 配置編集
   </label>
-  <div style="display:flex;gap:6px;margin-left:8px">
+  <div id="adminNav" style="display:none;gap:6px;margin-left:8px">
     <a href="/ui/pricing" target="_blank" style="color:#0ea5e9;font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">料金設定</a>
     <a href="/ui/salary" target="_blank" style="color:#0ea5e9;font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">給与管理</a>
     <a href="/ui/weather" target="_blank" style="color:#0ea5e9;font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">天気/シフト</a>
     <a href="/ui/subscription" target="_blank" style="color:#0ea5e9;font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">サブスク</a>
+    <a href="/ui/management" target="_blank" style="color:#f59e0b;font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid #f59e0b44;text-decoration:none;font-weight:700">分析</a>
   </div>
   <div class="muted" style="margin-left:auto">テーブル: <span id="selTable" class="mono">-</span> ／ SS: <span id="selSess" class="mono">-</span></div>
 </header>
@@ -969,6 +975,18 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
 const $ = (id)=>document.getElementById(id);
 const role = ()=> $('role').value;
 const store = ()=> parseInt($('storeId').value||'1',10);
+
+/* 管理ナビの表示切替（owner/managerのみ） */
+function updateAdminNav(){
+  const nav=$('adminNav');
+  if(!nav)return;
+  const r=role();
+  nav.style.display=(r==='owner'||r==='manager')?'flex':'none';
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  updateAdminNav();
+  $('role')?.addEventListener('change', updateAdminNav);
+});
 
 let selectedTableId = null;
 let currentSessionId = null;

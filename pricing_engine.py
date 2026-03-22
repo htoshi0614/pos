@@ -8,10 +8,11 @@ from pydantic import BaseModel
 from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 
-from db_shared import Base, SessionLocal
+from db_shared import Base, SessionLocal, require_role
 
 JST = ZoneInfo("Asia/Tokyo")
 router = APIRouter(tags=["pricing"])
+ADMIN_ROLES = ["owner", "manager"]
 
 # ─────────────────────────── DB Models ───────────────────────────
 
@@ -153,6 +154,7 @@ def compute_totals(subtotal: float, night_add: float,
 @router.get("/settings/pricing/{store_id}")
 def get_pricing(store_id: int,
                 x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
         cfg   = db.query(PricingConfig).filter_by(store_id=store_id).first()
@@ -167,6 +169,7 @@ def get_pricing(store_id: int,
 @router.post("/settings/pricing/{store_id}/config")
 def save_pricing_config(store_id: int, payload: PricingConfigIn,
                         x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
         cfg = db.query(PricingConfig).filter_by(store_id=store_id).first()
@@ -184,6 +187,7 @@ def save_pricing_config(store_id: int, payload: PricingConfigIn,
 @router.post("/settings/pricing/{store_id}/slots")
 def add_slot(store_id: int, payload: TimeSlotRuleIn,
              x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
         rule = TimeSlotRule(store_id=store_id, **payload.dict())
@@ -195,6 +199,7 @@ def add_slot(store_id: int, payload: TimeSlotRuleIn,
 @router.put("/settings/pricing/{store_id}/slots/{rule_id}")
 def update_slot(store_id: int, rule_id: int, payload: TimeSlotRuleIn,
                 x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
         rule = db.query(TimeSlotRule).filter_by(id=rule_id, store_id=store_id).first()
@@ -210,6 +215,7 @@ def update_slot(store_id: int, rule_id: int, payload: TimeSlotRuleIn,
 @router.delete("/settings/pricing/{store_id}/slots/{rule_id}")
 def delete_slot(store_id: int, rule_id: int,
                 x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
         rule = db.query(TimeSlotRule).filter_by(id=rule_id, store_id=store_id).first()

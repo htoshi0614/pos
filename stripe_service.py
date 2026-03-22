@@ -7,9 +7,10 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text
 
-from db_shared import Base, SessionLocal
+from db_shared import Base, SessionLocal, require_role
 
 router = APIRouter(tags=["stripe"])
+ADMIN_ROLES = ["owner", "manager"]
 
 # ─────────────────────────── DB Models ───────────────────────────
 
@@ -72,6 +73,7 @@ def get_stripe_client(db, store_id: int):
 @router.get("/stripe-config/{store_id}")
 def get_stripe_config(store_id: int,
                       x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
         cfg = db.query(StripeConfig).filter_by(store_id=store_id).first()
@@ -93,6 +95,7 @@ def get_stripe_config(store_id: int,
 @router.post("/stripe-config/{store_id}")
 def save_stripe_config(store_id: int, payload: StripeConfigIn,
                        x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
         cfg = db.query(StripeConfig).filter_by(store_id=store_id).first()
@@ -111,6 +114,7 @@ def save_stripe_config(store_id: int, payload: StripeConfigIn,
 @router.get("/subscription/{store_id}")
 def get_subscription(store_id: int,
                      x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
         sub = db.query(StripeSubscription).filter_by(store_id=store_id).first()
@@ -123,6 +127,7 @@ def get_subscription(store_id: int,
 @router.post("/subscription/create-checkout")
 def create_checkout_session(payload: CreateSessionIn,
                              x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
         stripe, cfg = get_stripe_client(db, payload.store_id)
@@ -147,6 +152,7 @@ def create_checkout_session(payload: CreateSessionIn,
 @router.post("/subscription/portal")
 def customer_portal(store_id: int,
                     x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
         stripe_client, _ = get_stripe_client(db, store_id)

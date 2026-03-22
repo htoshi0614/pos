@@ -8,10 +8,11 @@ from pydantic import BaseModel
 from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, DateTime, Text
 from sqlalchemy.orm import relationship
 import io, json
-from db_shared import Base, SessionLocal
+from db_shared import Base, SessionLocal, require_role
 
 JST = ZoneInfo("Asia/Tokyo")
 router = APIRouter(tags=["salary"])
+ADMIN_ROLES = ["owner", "manager"]
 
 # ─────────────────────────── DB Models ───────────────────────────
 
@@ -205,6 +206,7 @@ def export_salary_excel(data: List[dict], year: int, month: int) -> bytes:
 @router.get("/cast-salary-configs")
 def list_salary_configs(store_id: int,
                         x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
         try:
@@ -228,6 +230,7 @@ def list_salary_configs(store_id: int,
 @router.post("/cast-salary-configs")
 def save_salary_config(payload: CastSalaryConfigIn,
                        x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
         cfg = db.query(CastSalaryConfig).filter_by(cast_id=payload.cast_id).first()
@@ -248,6 +251,7 @@ def get_salary_report(store_id: int,
                       year: int = Query(default=None),
                       month: int = Query(default=None),
                       x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     now_jst = datetime.now(tz=JST)
     y = year  or now_jst.year
     m = month or now_jst.month
@@ -263,6 +267,7 @@ def export_salary(store_id: int,
                   year: int = Query(default=None),
                   month: int = Query(default=None),
                   x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     now_jst = datetime.now(tz=JST)
     y = year  or now_jst.year
     m = month or now_jst.month
@@ -282,6 +287,7 @@ def export_salary(store_id: int,
 @router.post("/drink-back")
 def record_drink_back(store_id: int, payload: DrinkBackIn,
                       x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
         rec = DrinkBackRecord(store_id=store_id, **payload.dict())
