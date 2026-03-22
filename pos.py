@@ -1,7 +1,7 @@
 # app.py
 from datetime import datetime, date
 from typing import List, Optional, Dict, Literal
-import json, hashlib, asyncio
+import json, hashlib, asyncio, os
 from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -18,6 +18,173 @@ from fastapi import status
 from db_shared import Base, engine, SessionLocal
 
 app = FastAPI(title="Cabaret POS Full")
+
+# ---------- 業者パスワード ----------
+VENDOR_PASSWORD = os.environ.get("POS_VENDOR_PASSWORD", "posstart2024")
+
+@app.post("/auth/vendor-login")
+def vendor_login(payload: dict):
+    """業者パスワード認証"""
+    pw = payload.get("password", "")
+    if pw == VENDOR_PASSWORD:
+        return {"ok": True}
+    raise HTTPException(401, "パスワードが正しくありません")
+
+# ---------- ランディングページ (/) ----------
+@app.get("/", response_class=HTMLResponse)
+def landing_page():
+    return HTMLResponse(r"""<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>POS Start - ガールズバー専用POSシステム</title>
+<style>
+:root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--accent:#0ea5e9;--green:#22c55e;--purple:#a855f7}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);display:flex;align-items:center;justify-content:center;min-height:100vh}
+.container{width:100%;max-width:480px;padding:24px}
+.logo-area{text-align:center;margin-bottom:32px}
+.logo-area h1{font-size:28px;font-weight:800;letter-spacing:1px}
+.logo-area h1 span{color:var(--accent)}
+.logo-area p{color:var(--muted);font-size:13px;margin-top:6px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px;margin-bottom:16px}
+.card h2{font-size:16px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.card h2 .icon{font-size:20px}
+.plan-box{background:#0a1423;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.plan-price{font-size:28px;font-weight:800;color:var(--accent)}
+.plan-price span{font-size:14px;font-weight:400;color:var(--muted)}
+.plan-detail{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7}
+.plan-detail li{list-style:none;padding-left:16px;position:relative}
+.plan-detail li::before{content:"✓";position:absolute;left:0;color:var(--green);font-weight:700}
+.methods{display:flex;flex-direction:column;gap:10px}
+.method-btn{display:flex;align-items:center;gap:12px;width:100%;padding:14px 16px;border-radius:12px;border:1px solid var(--line);background:#111827;color:var(--text);font-size:15px;cursor:pointer;transition:all .15s}
+.method-btn:hover{border-color:var(--accent);background:#0c1a2e}
+.method-btn .m-icon{font-size:22px;width:32px;text-align:center}
+.method-btn .m-label{flex:1;text-align:left}
+.method-btn .m-sub{font-size:11px;color:var(--muted)}
+.method-btn .arrow{color:var(--muted);font-size:18px}
+.divider{display:flex;align-items:center;gap:12px;margin:8px 0}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line)}
+.divider span{font-size:12px;color:var(--muted);white-space:nowrap}
+.vendor-section{text-align:center}
+.vendor-toggle{background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:8px;text-decoration:underline}
+.vendor-toggle:hover{color:var(--text)}
+.vendor-form{display:none;margin-top:12px}
+.vendor-form.show{display:block}
+.input-group{position:relative;margin-bottom:12px}
+.input-group input{width:100%;padding:12px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line);background:#0a1423;color:var(--text);outline:none}
+.input-group input:focus{border-color:var(--accent)}
+.vendor-btn{width:100%;padding:12px;border-radius:10px;border:none;background:var(--purple);color:#fff;font-size:15px;font-weight:700;cursor:pointer;transition:opacity .15s}
+.vendor-btn:hover{opacity:.9}
+.vendor-btn:disabled{opacity:.5;cursor:not-allowed}
+.error-msg{color:#ef4444;font-size:13px;margin-top:8px;display:none}
+.footer{text-align:center;margin-top:20px}
+.footer p{font-size:11px;color:#475569;line-height:1.6}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.shake{animation:shake .3s ease}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="logo-area">
+    <h1>🍸 <span>POS</span> Start</h1>
+    <p>ガールズバー専用 POSシステム</p>
+  </div>
+
+  <div class="card">
+    <h2><span class="icon">💳</span>ご利用プラン</h2>
+    <div class="plan-box">
+      <div class="plan-price">¥80,000<span> /月（税込）</span></div>
+      <ul class="plan-detail">
+        <li>全機能利用可能</li>
+        <li>複数端末対応（リアルタイム同期）</li>
+        <li>顧客管理・売上分析・Zレポート</li>
+        <li>自動バックアップ・監査ログ</li>
+      </ul>
+    </div>
+    <div class="methods">
+      <button class="method-btn" onclick="payStripe()">
+        <div class="m-icon">💳</div>
+        <div class="m-label">
+          クレジットカードで申し込む
+          <div class="m-sub">VISA / Mastercard / AMEX 対応</div>
+        </div>
+        <div class="arrow">→</div>
+      </button>
+      <button class="method-btn" onclick="payBank()">
+        <div class="m-icon">🏦</div>
+        <div class="m-label">
+          口座振込で申し込む
+          <div class="m-sub">請求書を発行します</div>
+        </div>
+        <div class="arrow">→</div>
+      </button>
+    </div>
+  </div>
+
+  <div class="card vendor-section">
+    <div class="divider"><span>POS業者の方はこちら</span></div>
+    <button class="vendor-toggle" onclick="toggleVendor()">パスワードでログイン</button>
+    <div class="vendor-form" id="vendorForm">
+      <div class="input-group">
+        <input id="vendorPw" type="password" placeholder="業者パスワードを入力" autocomplete="off">
+      </div>
+      <button class="vendor-btn" id="vendorBtn" onclick="vendorLogin()">ログイン</button>
+      <div class="error-msg" id="vendorError"></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <p>© 2024 POS Start — お問い合わせ: support@posstart.jp</p>
+  </div>
+</div>
+
+<script>
+function payStripe(){
+  // Stripeチェックアウトへ遷移
+  // 実際にはStripe Checkout Sessionを作成してリダイレクト
+  window.location.href='/ui/subscription';
+}
+function payBank(){
+  alert('口座振込のご案内をメールでお送りします。\n\n振込先:\n三菱UFJ銀行 ○○支店\n普通 1234567\nカ）ポススタート\n\n月額: ¥80,000（税込）\n\nお振込確認後、アカウントを有効化いたします。');
+}
+function toggleVendor(){
+  const f=document.getElementById('vendorForm');
+  f.classList.toggle('show');
+  if(f.classList.contains('show')) document.getElementById('vendorPw').focus();
+}
+async function vendorLogin(){
+  const pw=document.getElementById('vendorPw').value;
+  const btn=document.getElementById('vendorBtn');
+  const err=document.getElementById('vendorError');
+  if(!pw){err.textContent='パスワードを入力してください';err.style.display='block';return;}
+  btn.disabled=true; btn.textContent='確認中...';
+  try{
+    const r=await fetch('/auth/vendor-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
+    if(r.ok){
+      sessionStorage.setItem('pos_auth','vendor');
+      window.location.href='/ui';
+    }else{
+      const d=await r.json();
+      err.textContent=d.detail||'パスワードが正しくありません';
+      err.style.display='block';
+      document.getElementById('vendorPw').classList.add('shake');
+      setTimeout(()=>document.getElementById('vendorPw').classList.remove('shake'),400);
+    }
+  }catch(e){
+    err.textContent='通信エラーが発生しました';err.style.display='block';
+  }finally{
+    btn.disabled=false; btn.textContent='ログイン';
+  }
+}
+document.getElementById('vendorPw').addEventListener('keydown',(e)=>{
+  if(e.key==='Enter') vendorLogin();
+});
+</script>
+</body>
+</html>""")
 
 # ---------- WebSocket Manager (複数端末同期) ----------
 class ConnectionManager:
