@@ -270,9 +270,19 @@ th{color:var(--muted)}
   <div class="card">
     <h2>天気設定</h2>
     <div class="grid3">
-      <label>都市名<input id="city" value="Tokyo"></label>
-      <label>緯度<input id="lat" type="number" step="0.0001" value="35.6762"></label>
-      <label>経度<input id="lon" type="number" step="0.0001" value="139.6503"></label>
+      <label>地域
+        <select id="city" onchange="onCityChange()">
+          <option value="東京" data-lat="35.6762" data-lon="139.6503">東京都</option>
+          <option value="横浜" data-lat="35.4437" data-lon="139.6380">神奈川県（横浜）</option>
+          <option value="さいたま" data-lat="35.8617" data-lon="139.6455">埼玉県（さいたま）</option>
+          <option value="千葉" data-lat="35.6073" data-lon="140.1063">千葉県</option>
+          <option value="水戸" data-lat="36.3414" data-lon="140.4468">茨城県（水戸）</option>
+          <option value="宇都宮" data-lat="36.5551" data-lon="139.8829">栃木県（宇都宮）</option>
+          <option value="前橋" data-lat="36.3912" data-lon="139.0608">群馬県（前橋）</option>
+        </select>
+      </label>
+      <input id="lat" type="hidden" value="35.6762">
+      <input id="lon" type="hidden" value="139.6503">
       <label>基準出勤数<input id="base" type="number" value="5"></label>
       <label>雨天時調整（±）<input id="rain_adj" type="number" value="-1"></label>
       <label>寒冷時（<10℃）調整<input id="cold_adj" type="number" value="-1"></label>
@@ -352,8 +362,16 @@ async function loadSchedules(){
   }catch(e){alert(e.message)}
 }
 
+function onCityChange(){
+  const sel=$('city');
+  const opt=sel.options[sel.selectedIndex];
+  $('lat').value=opt.dataset.lat;
+  $('lon').value=opt.dataset.lon;
+}
+
 async function saveConfig(){
   const s=$('storeId').value;
+  onCityChange();
   try{
     await api(`/weather-config/${s}`,{method:'POST',body:{
       city_name:$('city').value,
@@ -374,9 +392,15 @@ async function saveConfig(){
   try{
     const cfg=await api(`/weather-config/${s}`);
     if(cfg){
-      $('city').value=cfg.city_name||'Tokyo';
-      $('lat').value=cfg.latitude||35.6762;
-      $('lon').value=cfg.longitude||139.6503;
+      // セレクトの値を復元
+      const cityName=cfg.city_name||'東京';
+      const sel=$('city');
+      let found=false;
+      for(let i=0;i<sel.options.length;i++){
+        if(sel.options[i].value===cityName){sel.selectedIndex=i;found=true;break;}
+      }
+      if(!found) sel.selectedIndex=0;
+      onCityChange();
       $('base').value=cfg.base_staff||5;
       $('rain_adj').value=cfg.rainy_adj??-1;
       $('cold_adj').value=cfg.cold_adj??-1;

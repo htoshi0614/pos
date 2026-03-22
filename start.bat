@@ -21,9 +21,9 @@ echo   完了
 echo.
 
 echo [3/3] サーバーを起動中...
-echo   ブラウザで開く: http://localhost:8000/ui
+echo   ブラウザで開く: http://localhost:8000
 echo.
-start "" "http://localhost:8000/ui"
+start "" "http://localhost:8000"
 
 uvicorn pos:app --host 0.0.0.0 --port 8000 --reload
 pause

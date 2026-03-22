@@ -30,6 +30,213 @@ def vendor_login(payload: dict):
         return {"ok": True}
     raise HTTPException(401, "パスワードが正しくありません")
 
+# ---------- 申し込みページ (/signup) ----------
+@app.get("/signup", response_class=HTMLResponse)
+def signup_page():
+    return HTMLResponse(r"""<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>お申し込み - POS Start</title>
+<style>
+:root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--accent:#0ea5e9;--green:#22c55e}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);display:flex;align-items:center;justify-content:center;min-height:100vh}
+.container{width:100%;max-width:520px;padding:24px}
+.back{display:inline-block;color:var(--muted);font-size:13px;text-decoration:none;margin-bottom:16px}
+.back:hover{color:var(--text)}
+.logo-area{text-align:center;margin-bottom:24px}
+.logo-area h1{font-size:24px;font-weight:800}
+.logo-area h1 span{color:var(--accent)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px;margin-bottom:16px}
+.card h2{font-size:16px;margin-bottom:6px}
+.card .sub{font-size:13px;color:var(--muted);margin-bottom:20px}
+.plan-summary{display:flex;justify-content:space-between;align-items:center;background:#0a1423;border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:20px}
+.plan-summary .name{font-weight:700}
+.plan-summary .price{font-size:20px;font-weight:800;color:var(--accent)}
+.plan-summary .price span{font-size:12px;font-weight:400;color:var(--muted)}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+.field input,.field select{width:100%;padding:11px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line);background:#0a1423;color:var(--text);outline:none}
+.field input:focus{border-color:var(--accent)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.method-tabs{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:20px}
+.method-tab{flex:1;padding:12px;text-align:center;font-size:14px;cursor:pointer;background:#111827;color:var(--muted);border:none;transition:all .15s}
+.method-tab.active{background:var(--accent);color:#001018;font-weight:700}
+.method-tab:not(:last-child){border-right:1px solid var(--line)}
+.card-fields,.bank-fields{display:none}
+.card-fields.show,.bank-fields.show{display:block}
+.submit-btn{width:100%;padding:14px;border-radius:12px;border:none;font-size:16px;font-weight:700;cursor:pointer;transition:opacity .15s}
+.submit-btn:hover{opacity:.9}
+.submit-btn:disabled{opacity:.5;cursor:not-allowed}
+.submit-btn.card-pay{background:var(--accent);color:#001018}
+.submit-btn.bank-pay{background:var(--green);color:#001018}
+.secure{display:flex;align-items:center;justify-content:center;gap:6px;font-size:11px;color:var(--muted);margin-top:12px}
+.bank-info{background:#0a1423;border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px;font-size:14px;line-height:1.8}
+.bank-info .label{font-size:11px;color:var(--muted)}
+.success-msg{display:none;text-align:center;padding:40px 20px}
+.success-msg h2{color:var(--green);margin-bottom:12px}
+.error-msg{color:#ef4444;font-size:13px;margin-top:8px;display:none}
+</style>
+</head>
+<body>
+<div class="container">
+  <a href="/" class="back">← 戻る</a>
+  <div class="logo-area">
+    <h1>🍸 <span>POS</span> Start</h1>
+  </div>
+
+  <div id="formArea">
+  <div class="card">
+    <h2>お申し込み</h2>
+    <div class="sub">ご利用情報を入力してください</div>
+
+    <div class="plan-summary">
+      <div class="name">スタンダードプラン（月額）</div>
+      <div class="price">¥80,000<span> /月（税込）</span></div>
+    </div>
+
+    <div class="field">
+      <label>店舗名</label>
+      <input id="shopName" placeholder="例: Bar LUNA">
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>担当者名</label>
+        <input id="contactName" placeholder="山田 太郎">
+      </div>
+      <div class="field">
+        <label>電話番号</label>
+        <input id="contactPhone" type="tel" placeholder="090-1234-5678">
+      </div>
+    </div>
+    <div class="field">
+      <label>メールアドレス</label>
+      <input id="contactEmail" type="email" placeholder="info@example.com">
+    </div>
+
+    <div style="font-size:13px;color:var(--muted);margin-bottom:8px">お支払い方法</div>
+    <div class="method-tabs">
+      <button class="method-tab active" onclick="switchMethod('card')">💳 クレジットカード</button>
+      <button class="method-tab" onclick="switchMethod('bank')">🏦 口座振込</button>
+    </div>
+
+    <div class="card-fields show" id="cardSection">
+      <div class="field">
+        <label>カード番号</label>
+        <input id="cardNum" placeholder="1234 5678 9012 3456" maxlength="19">
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label>有効期限</label>
+          <input id="cardExp" placeholder="MM/YY" maxlength="5">
+        </div>
+        <div class="field">
+          <label>セキュリティコード</label>
+          <input id="cardCvc" placeholder="123" maxlength="4">
+        </div>
+      </div>
+      <button class="submit-btn card-pay" onclick="submitCard()">カードで申し込む</button>
+      <div class="secure">🔒 SSL暗号化通信で安全に処理されます</div>
+    </div>
+
+    <div class="bank-fields" id="bankSection">
+      <div class="bank-info">
+        <div class="label">振込先</div>
+        <strong>三菱UFJ銀行 ○○支店</strong><br>
+        普通 1234567<br>
+        カ）ポススタート<br><br>
+        <div class="label">お振込金額</div>
+        <strong>¥80,000（税込）</strong><br><br>
+        <div style="font-size:12px;color:var(--muted)">
+          ※ お振込確認後、1営業日以内にアカウントを有効化いたします。<br>
+          ※ 振込手数料はお客様負担となります。
+        </div>
+      </div>
+      <button class="submit-btn bank-pay" onclick="submitBank()">振込で申し込む</button>
+    </div>
+
+    <div class="error-msg" id="errorMsg"></div>
+  </div>
+  </div>
+
+  <div class="success-msg" id="successMsg">
+    <div style="font-size:48px;margin-bottom:16px">✅</div>
+    <h2>お申し込みありがとうございます！</h2>
+    <p style="color:var(--muted);font-size:14px;margin-bottom:20px" id="successDetail"></p>
+    <a href="/" style="color:var(--accent);font-size:14px">トップに戻る</a>
+  </div>
+</div>
+
+<script>
+function switchMethod(m){
+  document.querySelectorAll('.method-tab').forEach(t=>t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('cardSection').classList.toggle('show', m==='card');
+  document.getElementById('bankSection').classList.toggle('show', m==='bank');
+}
+
+function validate(){
+  const shop=document.getElementById('shopName').value.trim();
+  const name=document.getElementById('contactName').value.trim();
+  const email=document.getElementById('contactEmail').value.trim();
+  const err=document.getElementById('errorMsg');
+  if(!shop||!name||!email){
+    err.textContent='店舗名・担当者名・メールアドレスは必須です';
+    err.style.display='block';
+    return false;
+  }
+  err.style.display='none';
+  return true;
+}
+
+function submitCard(){
+  if(!validate()) return;
+  const num=document.getElementById('cardNum').value.trim();
+  const exp=document.getElementById('cardExp').value.trim();
+  const cvc=document.getElementById('cardCvc').value.trim();
+  const err=document.getElementById('errorMsg');
+  if(!num||!exp||!cvc){
+    err.textContent='カード情報を全て入力してください';
+    err.style.display='block';
+    return;
+  }
+  // 実際のStripe決済はStripe.jsで処理
+  // ここではデモ表示
+  document.getElementById('formArea').style.display='none';
+  const s=document.getElementById('successMsg');
+  s.style.display='block';
+  document.getElementById('successDetail').textContent=
+    'クレジットカードでのお申し込みを受け付けました。\n確認メールをお送りしましたのでご確認ください。';
+}
+
+function submitBank(){
+  if(!validate()) return;
+  document.getElementById('formArea').style.display='none';
+  const s=document.getElementById('successMsg');
+  s.style.display='block';
+  document.getElementById('successDetail').textContent=
+    '口座振込でのお申し込みを受け付けました。\n上記口座へのお振込をお願いいたします。確認後、アカウントを有効化いたします。';
+}
+
+// カード番号フォーマット
+document.getElementById('cardNum').addEventListener('input',function(e){
+  let v=e.target.value.replace(/\D/g,'');
+  v=v.replace(/(.{4})/g,'$1 ').trim();
+  e.target.value=v;
+});
+// 有効期限フォーマット
+document.getElementById('cardExp').addEventListener('input',function(e){
+  let v=e.target.value.replace(/\D/g,'');
+  if(v.length>=2) v=v.slice(0,2)+'/'+v.slice(2);
+  e.target.value=v;
+});
+</script>
+</body>
+</html>""")
+
 # ---------- ランディングページ (/) ----------
 @app.get("/", response_class=HTMLResponse)
 def landing_page():
@@ -143,9 +350,7 @@ body{background:var(--bg);color:var(--text);display:flex;align-items:center;just
 
 <script>
 function payStripe(){
-  // Stripeチェックアウトへ遷移
-  // 実際にはStripe Checkout Sessionを作成してリダイレクト
-  window.location.href='/ui/subscription';
+  window.location.href='/signup';
 }
 function payBank(){
   alert('口座振込のご案内をメールでお送りします。\n\n振込先:\n三菱UFJ銀行 ○○支店\n普通 1234567\nカ）ポススタート\n\n月額: ¥80,000（税込）\n\nお振込確認後、アカウントを有効化いたします。');
@@ -1130,6 +1335,11 @@ try:
     app.include_router(_backup_router)
 except Exception as e:
     print(f"[warn] backup_service router: {e}")
+try:
+    from point_mail import router as _mail_router, MailConfig, MailRecipient, MailLog
+    app.include_router(_mail_router)
+except Exception as e:
+    print(f"[warn] point_mail router: {e}")
 
 # ======================= UI (/ui) 完全版（取消＆数量管理つき） =======================
 from fastapi.responses import HTMLResponse
@@ -1252,7 +1462,6 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
       <option value="staff">staff</option>
     </select>
   </label>
-  <button id="seedBtn" class="btn" title="Ctrl+D">デモデータ</button>
   <label style="display:flex;align-items:center;gap:6px;">
     <input id="editToggle" type="checkbox"> 配置編集
   </label>
@@ -1267,6 +1476,7 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
     <a href="/ui/backup" target="_blank" style="color:#64748b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #64748b44;text-decoration:none">DB</a>
     <a href="/ui/audit" target="_blank" style="color:#64748b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #64748b44;text-decoration:none">監査</a>
     <a href="/ui/weather" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">天気</a>
+    <a href="/ui/mail" target="_blank" style="color:#f59e0b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #f59e0b44;text-decoration:none">メール</a>
     <a href="/ui/subscription" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">サブスク</a>
   </div>
   <div class="muted" style="margin-left:auto;white-space:nowrap">
@@ -1848,11 +2058,6 @@ function startLoops(){
 
 /* 初期化 */
 async function initUI(){
-  $('seedBtn')?.addEventListener('click', async ()=>{
-    try{ try{ await api(`/admin/seed_demo?store_id=${store()}`,{method:'POST'}); toast('デモデータ作成'); }catch{}; await loadFloor(); await loadItems(); }
-    catch(e){ toast(e.message,'err'); }
-  });
-
   // 入店/延長関係
   $('btnCheckin').addEventListener('click', ()=>checkin().catch(e=>toast(e.message,'err')));
   $('btnExtend30').addEventListener('click', ()=>extend30().catch(e=>toast(e.message,'err')));
