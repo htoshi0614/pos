@@ -1,8 +1,8 @@
 # app.py
 from datetime import datetime, date
 from typing import List, Optional, Dict, Literal
-import json, hashlib
-from fastapi import FastAPI, HTTPException, Header
+import json, hashlib, asyncio
+from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import (
@@ -14,13 +14,78 @@ from zoneinfo import ZoneInfo
 from datetime import datetime, timezone
 from fastapi import status
 
-# ---------- DB ----------
-DATABASE_URL = "sqlite:///./pos.db"
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-Base = declarative_base()
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+# ---------- DB (共有モジュールから) ----------
+from db_shared import Base, engine, SessionLocal
 
 app = FastAPI(title="Cabaret POS Full")
+
+# ---------- WebSocket Manager (複数端末同期) ----------
+class ConnectionManager:
+    def __init__(self):
+        self.active: List[WebSocket] = []
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.active.append(ws)
+
+    def disconnect(self, ws: WebSocket):
+        if ws in self.active:
+            self.active.remove(ws)
+
+    async def broadcast(self, message: dict):
+        for ws in self.active[:]:
+            try:
+                await ws.send_json(message)
+            except Exception:
+                self.active.remove(ws)
+
+ws_manager = ConnectionManager()
+
+async def notify_clients(event: str, data: dict = None):
+    """全端末にイベントを通知"""
+    try:
+        await ws_manager.broadcast({"event": event, "data": data or {}})
+    except Exception:
+        pass
+
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    await ws_manager.connect(ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(ws)
+
+# ---------- 監査ログミドルウェア ----------
+@app.middleware("http")
+async def audit_middleware(request: Request, call_next):
+    response = await call_next(request)
+    # POST/PUT/PATCH/DELETE のみ記録
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        try:
+            db = SessionLocal()
+            body_str = ""
+            try:
+                # bodyは既に消費されている可能性があるので、パスとメソッドのみ記録
+                body_str = f"query={dict(request.query_params)}"
+            except Exception:
+                pass
+            role_val = request.headers.get("X-Role", "")
+            ip = request.client.host if request.client else ""
+            log = AuditLog(
+                actor_role=role_val,
+                path=str(request.url.path),
+                method=request.method,
+                payload=body_str[:500],
+                ip=ip,
+                hash=hashlib.sha256(f"{role_val}{request.url.path}{request.method}".encode()).hexdigest()[:16],
+            )
+            db.add(log); db.commit()
+            db.close()
+        except Exception:
+            pass
+    return response
 
 # ---------- Auth / Role ----------
 Role = Literal["owner", "manager", "cashier", "staff"]
@@ -29,6 +94,19 @@ def require_role(role_header: Optional[str], allowed: List[str]):
         raise HTTPException(401, "Missing X-Role")
     if role_header not in allowed:
         raise HTTPException(403, f"Role '{role_header}' not allowed for this action")
+
+def check_closing_lock(db, session_obj):
+    """本締め済みの営業日に属するセッションへの変更をブロック"""
+    try:
+        from closing import Closing
+        jst = ZoneInfo("Asia/Tokyo")
+        st = session_obj.start_time.replace(tzinfo=timezone.utc).astimezone(jst)
+        biz_date = st.strftime("%Y-%m-%d")
+        c = db.query(Closing).filter_by(store_id=session_obj.store_id, business_date=biz_date, status="final").first()
+        if c:
+            raise HTTPException(423, f"本締め済み（{biz_date}）のため変更できません。管理者に解除を依頼してください。")
+    except ImportError:
+        pass
 
 # ---------- Models ----------
 class Store(Base):
@@ -115,11 +193,13 @@ class Order(Base):
     store_id = Column(Integer, ForeignKey("stores.id"))
     session_id = Column(Integer, ForeignKey("sessions.id"))
     item_id = Column(Integer, ForeignKey("items.id"))
+    cast_id = Column(Integer, ForeignKey("casts.id"), nullable=True)  # ドリンクバック対象キャスト
     qty = Column(Integer, default=1)
     unit_price = Column(Float, default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
     session = relationship("Session", back_populates="orders")
     item = relationship("Item")
+    cast = relationship("Cast")
 
 class Nomination(Base):
     __tablename__ = "nominations"
@@ -262,6 +342,7 @@ class OrderIn(BaseModel):
     store_id: int
     item_id: int
     qty: int = Field(gt=0, default=1)
+    cast_id: Optional[int] = None  # ドリンクバック対象キャスト（nullならバックなし）
 
 class PaymentIn(BaseModel):
     store_id: int
@@ -293,30 +374,88 @@ def seed():
         db.close()
 seed()
 
+# ---------- 拡張モジュールのテーブル作成 ----------
+try:
+    from pricing_engine import PricingConfig, TimeSlotRule
+    from cast_salary import CastSalaryConfig, DrinkBackRecord
+    from weather_service import WeatherConfig, StaffSchedule
+    from stripe_service import StripeSubscription, StripeConfig
+    from closing import Closing
+    from bottle_keep import BottleKeep
+    from customer_crm import CustomerProfile, VisitLog
+    from tab_management import TabRecord, TabPayment
+    from management import CastGoal
+    Base.metadata.create_all(engine)
+except Exception as _ext_err:
+    print(f"[warn] 拡張モジュール読み込み: {_ext_err}")
+
+# --- orders.cast_id カラム追加マイグレーション ---
+try:
+    with engine.connect() as conn:
+        from sqlalchemy import text, inspect
+        cols = [c["name"] for c in inspect(engine).get_columns("orders")]
+        if "cast_id" not in cols:
+            conn.execute(text("ALTER TABLE orders ADD COLUMN cast_id INTEGER"))
+            conn.commit()
+            print("[migrate] orders.cast_id added")
+except Exception:
+    pass
+
 # ---------- 会計計算 ----------
 def compute_bill(db, s: Session) -> Dict:
-    set_fee = 6000.0
-    extend_fee = 3000.0
+    # 料金ルールエンジンから設定を取得
+    try:
+        from pricing_engine import get_pricing_config, get_slot_rule, compute_night_surcharge, compute_totals
+        config   = get_pricing_config(db, s.store_id)
+        slot     = get_slot_rule(db, s.store_id, s.start_time)
+        set_fee    = slot.set_price    if slot else 6000.0
+        extend_fee = slot.extend_price if slot else 3000.0
+    except Exception:
+        config = None
+        set_fee = 6000.0
+        extend_fee = 3000.0
+
     end_time = s.end_time or datetime.utcnow()
 
-    total_minutes = max(0, int((end_time - s.start_time).total_seconds() // 60))
+    total_minutes  = max(0, int((end_time - s.start_time).total_seconds() // 60))
     booked_minutes = int(s.set_minutes or 60)
-    sets = 1 if total_minutes >= 0 else 1
+    sets      = 1
     remaining = max(0, total_minutes - booked_minutes)
-    extends = (remaining + s.extend_unit - 1) // s.extend_unit if remaining > 0 else 0
+    extends   = (remaining + s.extend_unit - 1) // s.extend_unit if remaining > 0 else 0
 
-    set_amount = sets * set_fee * s.guest_count
+    set_amount    = sets * set_fee * s.guest_count
     extend_amount = extends * extend_fee * s.guest_count
-    time_amount = set_amount + extend_amount
+    time_amount   = set_amount + extend_amount
+
+    # お通し/TC・VIP席料
+    table_charge = 0.0
+    vip_fee      = 0.0
+    if config:
+        table_charge = (config.table_charge_pp or 0) * s.guest_count
+        vip_fee      = config.vip_seat_fee or 0
 
     order_subtotal = sum(o.unit_price * o.qty for o in s.orders)
-    subtotal = time_amount + order_subtotal
-    service_fee = int(round(subtotal * 0.10))
-    tax = int(round((subtotal + service_fee) * 0.10))
-    total = int(round(subtotal + service_fee + tax))
+    subtotal = time_amount + order_subtotal + table_charge + vip_fee
+
+    # 深夜加算
+    try:
+        night_add = compute_night_surcharge(config, subtotal, s.start_time)
+    except Exception:
+        night_add = 0.0
+
+    # SC・税・合計（設定に従って計算）
+    try:
+        totals = compute_totals(subtotal, night_add, config)
+        service_fee = totals["service_fee"]
+        tax         = totals["tax"]
+        total       = totals["total"]
+    except Exception:
+        service_fee = int(round(subtotal * 0.10))
+        tax         = int(round((subtotal + service_fee) * 0.10))
+        total       = int(round(subtotal + service_fee + tax))
 
     paid = int(round(sum(p.amount for p in s.payments)))
-    due = max(0, total - paid)
+    due  = max(0, total - paid)
 
     return {
         "session_id": s.id,
@@ -325,7 +464,7 @@ def compute_bill(db, s: Session) -> Dict:
         "start_time": s.start_time.isoformat(),
         "end_time": end_time.isoformat(),
         "guest_count": s.guest_count,
-        "booked_minutes": booked_minutes, # 予約は set_minutes のまま
+        "booked_minutes": booked_minutes,
         "elapsed_minutes": total_minutes,
         "time_breakdown": {
             "total_minutes": total_minutes,
@@ -335,6 +474,9 @@ def compute_bill(db, s: Session) -> Dict:
             "extend_amount": float(extend_amount),
             "time_amount": float(time_amount),
         },
+        "table_charge": float(table_charge),
+        "vip_fee": float(vip_fee),
+        "night_surcharge": float(night_add),
         "orders": [
             {"name": o.item.name, "qty": o.qty, "amount": o.unit_price * o.qty}
             for o in s.orders
@@ -388,6 +530,15 @@ def list_tables(store_id:int, x_role: Optional[Role]=Header(None, alias="X-Role"
     finally:
         db.close()
 
+@app.get("/casts", response_model=List[CastOut])
+def list_casts(store_id: int, x_role: Optional[Role]=Header(None, alias="X-Role")):
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    db = SessionLocal()
+    try:
+        return db.query(Cast).filter_by(store_id=store_id, is_active=True).all()
+    finally:
+        db.close()
+
 @app.post("/items", response_model=ItemOut)
 def create_item(payload: ItemIn, x_role: Optional[Role] = Header(None, alias="X-Role")):
     require_role(x_role, ["owner","manager"])
@@ -431,6 +582,7 @@ def start_session(payload: SessionStartIn, x_role: Optional[Role]=Header(None, a
 
         # eager load してから辞書化
         s = db.query(Session).options(joinedload(Session.table)).get(s.id)
+        asyncio.get_event_loop().create_task(notify_clients("checkin", {"session_id": s.id}))
         out = SessionOut.model_validate(session_to_out_dict(s), from_attributes=True)
         return out
     finally:
@@ -474,11 +626,30 @@ def add_order(session_id: int, payload: OrderIn, x_role: Optional[Role] = Header
     try:
         s = db.get(Session, session_id)
         if not s or s.status!="open": raise HTTPException(404, "Session not found")
+        check_closing_lock(db, s)
         item = db.get(Item, payload.item_id)
         if not item: raise HTTPException(404, "Item not found")
         o = Order(store_id=s.store_id, session_id=session_id,
-                  item_id=payload.item_id, qty=payload.qty, unit_price=item.price)
-        db.add(o); db.commit()
+                  item_id=payload.item_id, qty=payload.qty, unit_price=item.price,
+                  cast_id=payload.cast_id)
+        db.add(o); db.commit(); db.refresh(o)
+        asyncio.get_event_loop().create_task(notify_clients("order", {"session_id": session_id}))
+
+        # ドリンクバック自動記録（キャスト指定 + ドリンクカテゴリの場合）
+        if payload.cast_id and item.category == "drink":
+            try:
+                from cast_salary import CastSalaryConfig, DrinkBackRecord
+                cfg = db.query(CastSalaryConfig).filter_by(cast_id=payload.cast_id).first()
+                rate = cfg.drink_back_rate if cfg else 0
+                if rate > 0:
+                    back_amount = item.price * payload.qty * rate
+                    rec = DrinkBackRecord(
+                        store_id=s.store_id, cast_id=payload.cast_id,
+                        session_id=session_id, order_id=o.id, amount=back_amount)
+                    db.add(rec); db.commit()
+            except Exception:
+                pass  # モジュール未読み込みなら無視
+
         return {"ok": True, "order_id": o.id}
     finally:
         db.close()
@@ -490,9 +661,11 @@ def add_payment(session_id: int, payload: PaymentIn, x_role: Optional[Role] = He
     try:
         s = db.get(Session, session_id)
         if not s: raise HTTPException(404, "Session not found")
+        check_closing_lock(db, s)
         p = Payment(store_id=s.store_id, session_id=session_id,
                     method=payload.method, amount=payload.amount)
         db.add(p); db.commit()
+        asyncio.get_event_loop().create_task(notify_clients("payment", {"session_id": session_id}))
         return {"ok": True, "payment_id": p.id}
     finally:
         db.close()
@@ -508,8 +681,10 @@ def extend_session(session_id: int, x_role: Optional[Role] = Header(None, alias=
         s = db.get(Session, session_id)
         if not s or s.status != "open":
             raise HTTPException(404, "Session not found or closed")
+        check_closing_lock(db, s)
         s.set_minutes = int(s.set_minutes or 60) + int(s.extend_unit or 30)
         db.commit()
+        asyncio.get_event_loop().create_task(notify_clients("extend", {"session_id": session_id}))
         return {"ok": True, "set_minutes": s.set_minutes}
     finally:
         db.close()
@@ -521,10 +696,12 @@ def checkout(session_id: int, x_role: Optional[Role] = Header(None, alias="X-Rol
     try:
         s = db.get(Session, session_id)
         if not s: raise HTTPException(404, "Session not found")
+        check_closing_lock(db, s)
         s.status = "closed"
         s.end_time = datetime.utcnow()
         inv = issue_invoice(db, s)
         db.commit()
+        asyncio.get_event_loop().create_task(notify_clients("checkout", {"session_id": session_id}))
         return {"ok": True, "invoice_no": inv.invoice_no}
     finally:
         db.close()
@@ -540,6 +717,7 @@ def unextend_session(session_id: int, x_role: Optional[Role] = Header(None, alia
         s = db.get(Session, session_id)
         if not s or s.status != "open":
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found or closed")
+        check_closing_lock(db, s)
         s.set_minutes = max(s.extend_unit, int(s.set_minutes or 60) - int(s.extend_unit or 30))
         db.commit()
         return {"ok": True, "set_minutes": s.set_minutes}
@@ -559,8 +737,10 @@ def cancel_session(session_id: int, x_role: Optional[Role] = Header(None, alias=
         s = db.get(Session, session_id)
         if not s or s.status != "open":
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found or closed")
+        check_closing_lock(db, s)
         db.delete(s)
         db.commit()
+        asyncio.get_event_loop().create_task(notify_clients("cancel_session", {"session_id": session_id}))
         return {"ok": True, "deleted": session_id}
     finally:
         db.close()
@@ -577,6 +757,7 @@ def cancel_order(session_id: int, payload: OrderIn, x_role: Optional[Role] = Hea
         s = db.get(Session, session_id)
         if not s or s.status != "open":
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found or closed")
+        check_closing_lock(db, s)
         orders = (
             db.query(Order)
             .filter_by(session_id=session_id, item_id=payload.item_id)
@@ -594,6 +775,7 @@ def cancel_order(session_id: int, payload: OrderIn, x_role: Optional[Role] = Hea
                 o.qty -= to_cancel
                 to_cancel = 0
         db.commit()
+        asyncio.get_event_loop().create_task(notify_clients("cancel_order", {"session_id": session_id}))
         return {"ok": True, "remaining": to_cancel}
     finally:
         db.close()
@@ -610,42 +792,50 @@ def closing(store_id: int, x_role: Optional[Role] = Header(None, alias="X-Role")
         # DB は UTC 想定なので UTC に変換
         start_utc = start_jst.astimezone(timezone.utc)
 
-        # 今日入店したセッション（open/closed 両方）を対象にする
-        sessions = (
+        # 確定売上（closedセッション）のみ集計
+        closed_sessions = (
             db.query(Session)
             .options(
                 joinedload(Session.orders).joinedload(Order.item),
                 joinedload(Session.payments),
                 joinedload(Session.table),
-                )
-                .filter(Session.store_id == store_id, Session.start_time >= start_utc)
-                .all()
+            )
+            .filter(Session.store_id == store_id, Session.start_time >= start_utc, Session.status == "closed")
+            .all()
+        )
+        # 見込み売上（openセッション含む）も別途計算
+        open_sessions = (
+            db.query(Session)
+            .options(
+                joinedload(Session.orders).joinedload(Order.item),
+                joinedload(Session.payments),
+                joinedload(Session.table),
+            )
+            .filter(Session.store_id == store_id, Session.start_time >= start_utc, Session.status == "open")
+            .all()
         )
 
-        total_sales = 0
-        sess_details = []
-        for s in sessions:
-            # OPEN のものは「今この瞬間まで」の見込み額で計算される
+        confirmed_sales = 0
+        for s in closed_sessions:
             bill = compute_bill(db, s)
-            total_sales += int(bill.get("total", 0))
-            sess_details.append({
-                "session_id": s.id,
-                "status": s.status,
-                "table": s.table.name if s.table else None,
-                "total": int(bill.get("total", 0)),
-            })
+            confirmed_sales += int(bill.get("total", 0))
+
+        projected_sales = confirmed_sales
+        for s in open_sessions:
+            bill = compute_bill(db, s)
+            projected_sales += int(bill.get("total", 0))
 
         return {
             "store_id": store_id,
-            "mode": "projected", # 見込み売上
-            "total_sales": int(total_sales),
-            "session_count": len(sessions),
+            "total_sales": int(projected_sales),
+            "confirmed_sales": int(confirmed_sales),
+            "session_count": len(closed_sessions) + len(open_sessions),
+            "closed_count": len(closed_sessions),
+            "open_count": len(open_sessions),
             "period": {
-            "start_jst": start_jst.isoformat(),
-            "as_of_jst": now_jst.isoformat(),
+                "start_jst": start_jst.isoformat(),
+                "as_of_jst": now_jst.isoformat(),
             },
-            # 必要なら UI デバッグ用にコメントアウト解除
-            # "sessions": sess_details,
         }
     finally:
         db.close()
@@ -681,6 +871,99 @@ def seed_demo(store_id: int, x_role: Optional[Role] = Header(None, alias="X-Role
     finally:
         db.close()
 
+# ---------- 監査ログAPI ----------
+@app.get("/audit-logs")
+def list_audit_logs(limit: int = 100, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    require_role(x_role, ["owner", "manager"])
+    db = SessionLocal()
+    try:
+        rows = db.query(AuditLog).order_by(AuditLog.id.desc()).limit(limit).all()
+        return [{
+            "id": r.id, "ts": r.ts.isoformat() if r.ts else "",
+            "role": r.actor_role, "method": r.method, "path": r.path,
+            "payload": r.payload, "ip": r.ip,
+        } for r in rows]
+    finally:
+        db.close()
+
+# ---------- 領収書API ----------
+@app.get("/sessions/{session_id}/receipt")
+def get_receipt(session_id: int, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """領収書データを返す（HTML印刷用）"""
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    db = SessionLocal()
+    try:
+        s = db.get(Session, session_id)
+        if not s:
+            raise HTTPException(404, "Session not found")
+        bill = compute_bill(db, s)
+        profile = db.query(BusinessProfile).filter_by(store_id=s.store_id).first()
+        invoice = db.query(Invoice).filter_by(session_id=session_id).first()
+        return {
+            "bill": bill,
+            "invoice_no": invoice.invoice_no if invoice else f"TMP-{session_id}",
+            "store": {
+                "legal_name": profile.legal_name if profile else "店舗名",
+                "address":    profile.address    if profile else "",
+                "invoice_reg_no": profile.invoice_reg_no if profile else "",
+                "tel":        profile.tel         if profile else "",
+            }
+        }
+    finally:
+        db.close()
+
+# ---------- 拡張ルーターの登録 ----------
+try:
+    from pricing_engine import router as _pricing_router
+    app.include_router(_pricing_router)
+except Exception as e:
+    print(f"[warn] pricing_engine router: {e}")
+try:
+    from cast_salary import router as _salary_router
+    app.include_router(_salary_router)
+except Exception as e:
+    print(f"[warn] cast_salary router: {e}")
+try:
+    from weather_service import router as _weather_router
+    app.include_router(_weather_router)
+except Exception as e:
+    print(f"[warn] weather_service router: {e}")
+try:
+    from stripe_service import router as _stripe_router
+    app.include_router(_stripe_router)
+except Exception as e:
+    print(f"[warn] stripe_service router: {e}")
+try:
+    from management import router as _mgmt_router
+    app.include_router(_mgmt_router)
+except Exception as e:
+    print(f"[warn] management router: {e}")
+try:
+    from closing import router as _closing_router
+    app.include_router(_closing_router)
+except Exception as e:
+    print(f"[warn] closing router: {e}")
+try:
+    from bottle_keep import router as _bottle_router
+    app.include_router(_bottle_router)
+except Exception as e:
+    print(f"[warn] bottle_keep router: {e}")
+try:
+    from customer_crm import router as _crm_router
+    app.include_router(_crm_router)
+except Exception as e:
+    print(f"[warn] customer_crm router: {e}")
+try:
+    from tab_management import router as _tab_router
+    app.include_router(_tab_router)
+except Exception as e:
+    print(f"[warn] tab_management router: {e}")
+try:
+    from backup_service import router as _backup_router
+    app.include_router(_backup_router)
+except Exception as e:
+    print(f"[warn] backup_service router: {e}")
+
 # ======================= UI (/ui) 完全版（取消＆数量管理つき） =======================
 from fastapi.responses import HTMLResponse
 
@@ -695,7 +978,7 @@ def ui():
 <title>Cabaret POS - Floor</title>
 <style>
 :root{
-  --bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--accent:#0ea5e9;
+  --bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#b0bec5;--accent:#0ea5e9;
   --table-free:#e5e7eb; --t-ok:#ffffff; --t-warn:#facc15; --t-over:#ef4444; --t-paid:#3b82f6; --ink:#0b1220;
 }
 *{box-sizing:border-box;font-family:-apple-system,system-ui,"Noto Sans JP",Segoe UI,Roboto,sans-serif}
@@ -748,18 +1031,52 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
 .badge.on{background:#14532d;border-color:#22c55e}
 .badge.off{background:#2c1b1b;border-color:#ef4444}
 
+/* タイマーカード */
+#timerCard{border:2px solid transparent;transition:border-color .3s}
+#timerCard .cbody{background:linear-gradient(135deg,#0c1626,#0a1423)}
+
 /* 数量コントローラ */
 .itemRow{display:flex;align-items:center;gap:8px;border:1px solid #2a384f;border-radius:10px;padding:8px}
 .itemName{flex:1}
 .qtyCtrl{display:flex;align-items:center;gap:6px}
 .qtyCtrl button{width:34px;height:34px;border-radius:10px;border:1px solid #32445f;background:#0f1a2a;color:#e5e7eb;font-size:18px;cursor:pointer}
 .qtyCtrl .val{min-width:28px;text-align:center;font-weight:700}
+
+/* モバイル対応 */
+@media(max-width:900px){
+  header{flex-wrap:wrap;gap:8px;padding:10px 12px}
+  header h1{font-size:15px}
+  .page{grid-template-columns:1fr;gap:10px;padding:10px}
+  .floor-wrap{height:40vh}
+  .side{gap:10px}
+  .grid{grid-template-columns:1fr}
+  header div[style*="gap:6px"]{flex-wrap:wrap}
+}
+@media(max-width:500px){
+  .page{padding:6px}
+  .floor-wrap{height:35vh}
+  .bigbtn{font-size:14px;padding:8px 10px;min-height:40px}
+  .table{min-width:110px !important;min-height:70px !important}
+}
 </style>
 </head>
 <body>
+
+<!-- サブスク未払い警告モーダル -->
+<div id="subModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;align-items:center;justify-content:center">
+<div style="background:#1a0e12;border:2px solid #ef4444;border-radius:16px;padding:28px;max-width:440px;text-align:center">
+  <div style="font-size:32px;margin-bottom:10px">⚠️</div>
+  <h2 style="margin:0 0 10px;color:#fca5a5">サブスクリプション未払い</h2>
+  <p style="color:#b0bec5;font-size:14px;margin:0 0 16px">ご利用を続けるにはサブスクリプションの設定が必要です。</p>
+  <div style="display:flex;gap:10px;justify-content:center">
+    <a href="/ui/subscription" class="btn solid" style="text-decoration:none;font-size:15px;padding:10px 20px">サブスク設定へ</a>
+    <button class="btn" onclick="document.getElementById('subModal').style.display='none'" style="font-size:15px;padding:10px 20px">後で</button>
+  </div>
+</div></div>
+
 <header>
-  <h1>Cabaret POS</h1>
-  <label>Store <input id="storeId" type="number" value="1" style="width:80px"></label>
+  <h1>Girls Bar POS</h1>
+  <label>Store <input id="storeId" type="number" value="1" style="width:70px"></label>
   <label>Role
     <select id="role">
       <option value="owner" selected>owner</option>
@@ -768,20 +1085,56 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
       <option value="staff">staff</option>
     </select>
   </label>
-  <button id="seedBtn" class="btn">デモデータ作成</button>
-  <label style="display:flex;align-items:center;gap:6px;margin-left:8px;">
+  <button id="seedBtn" class="btn" title="Ctrl+D">デモデータ</button>
+  <label style="display:flex;align-items:center;gap:6px;">
     <input id="editToggle" type="checkbox"> 配置編集
   </label>
-  <div class="muted" style="margin-left:auto">選択テーブル: <span id="selTable" class="mono">-</span> ／ セッション: <span id="selSess" class="mono">-</span></div>
+  <div id="adminNav" style="display:none;gap:6px;margin-left:8px;flex-wrap:wrap">
+    <a href="/ui/management" target="_blank" style="color:#f59e0b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #f59e0b44;text-decoration:none;font-weight:700">分析</a>
+    <a href="/ui/closing" target="_blank" style="color:#22c55e;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #22c55e44;text-decoration:none;font-weight:700">締め</a>
+    <a href="/ui/customers" target="_blank" style="color:#a855f7;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #a855f744;text-decoration:none">顧客台帳</a>
+    <a href="/ui/bottles" target="_blank" style="color:#ec4899;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #ec489944;text-decoration:none">ボトルキープ</a>
+    <a href="/ui/tabs" target="_blank" style="color:#ef4444;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #ef444444;text-decoration:none">伝票</a>
+    <a href="/ui/pricing" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">料金</a>
+    <a href="/ui/salary" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">給与</a>
+    <a href="/ui/backup" target="_blank" style="color:#64748b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #64748b44;text-decoration:none">DB</a>
+    <a href="/ui/audit" target="_blank" style="color:#64748b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #64748b44;text-decoration:none">監査</a>
+    <a href="/ui/weather" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">天気</a>
+    <a href="/ui/subscription" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">サブスク</a>
+  </div>
+  <div class="muted" style="margin-left:auto;white-space:nowrap">
+    <span id="selTable" class="mono" style="font-size:16px;font-weight:700;color:var(--accent)">-</span>
+    <span style="margin:0 4px">/</span>
+    SS:<span id="selSess" class="mono">-</span>
+  </div>
 </header>
 
 <div class="page">
   <section class="panel">
-    <h2>フロア</h2>
+    <h2>フロア <span id="floorClock" class="mono muted" style="float:right;font-size:14px"></span></h2>
     <div class="p"><div class="floor-wrap" id="floor"></div></div>
   </section>
 
   <aside class="side">
+    <!-- タイマーカード（常時上部に表示） -->
+    <div class="card" id="timerCard" style="display:none">
+      <div class="cbody" style="padding:12px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="flex:1">
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <div class="mono" id="timerRemain" style="font-size:32px;font-weight:900;color:#22c55e">--</div>
+              <span class="muted" style="font-size:13px">分</span>
+            </div>
+            <div class="muted" id="timerDetail" style="font-size:12px">経過 - / 予約 -</div>
+          </div>
+          <div id="autoExtendBadge" class="badge off" style="font-size:10px">自動延長: OFF</div>
+        </div>
+        <div id="timerBar" style="height:6px;border-radius:3px;background:#1e293b;margin-top:8px;overflow:hidden">
+          <div id="timerBarFill" style="height:100%;border-radius:3px;background:#22c55e;width:0%;transition:width .5s"></div>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <h3>操作</h3>
       <div class="cbody">
@@ -790,49 +1143,71 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
           <div class="tab" data-tab="drink">ドリンク</div>
           <div class="tab" data-tab="bottle">ボトル</div>
           <div class="tab" data-tab="food">フード</div>
-        </div> 
+        </div>
         <div class="tabpanes">
           <div id="pane-entry" class="active">
-            <div class="row" style="gap:8px 8px">
-              <button class="bigbtn" id="btnCheckin">入店（60分）</button>
-              <button class="bigbtn" id="btnExtend30">延長 +30分</button>
-              <button class="bigbtn" id="btnUnextend">延長取消 -30分</button>
-              <button class="bigbtn" id="btnAutoExtend">⏸️ 自動延長 OFF</button>
-              <button class="bigbtn" id="btnCancelCheckin">入店取消</button>
-              <input id="payAmount" class="bigbtn" style="width:160px" placeholder="金額を入力">
-              <button class="bigbtn" id="btnPayCash">現金 入力金額</button>
-              <button class="bigbtn solid" id="btnCheckout">会計確定</button>
+            <!-- 入店エリア -->
+            <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
+              <label class="muted" style="font-size:12px;white-space:nowrap">人数</label>
+              <select id="guestCount" style="width:70px;font-size:15px;padding:6px">
+                <option value="1">1名</option><option value="2">2名</option><option value="3">3名</option>
+                <option value="4">4名</option><option value="5">5名</option><option value="6">6名</option>
+              </select>
+              <button class="bigbtn" id="btnCheckin" style="flex:1;text-align:center;background:#0e7490;border-color:#0e7490;color:#fff;font-weight:700">入店</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+              <button class="bigbtn" id="btnExtend30" style="text-align:center;font-size:14px">延長 +30分</button>
+              <button class="bigbtn" id="btnUnextend" style="text-align:center;font-size:14px">延長取消 -30分</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+              <button class="bigbtn" id="btnAutoExtend" style="text-align:center;font-size:13px">自動延長 OFF</button>
+              <button class="bigbtn" id="btnCancelCheckin" style="text-align:center;font-size:13px;color:#fca5a5;border-color:#7f1d1d">入店取消</button>
             </div>
             <hr>
-            <div class="row" style="gap:16px">
-              <div>
-                <div class="muted">タイマー</div>
-                <div class="mono" id="timerText" style="font-size:28px;font-weight:700">--:--</div>
-                <div class="muted" id="timerDetail">経過 - / 予約 - / 残り -</div>
+            <!-- 支払いエリア -->
+            <div style="margin-bottom:8px">
+              <div class="muted" style="font-size:11px;margin-bottom:4px">お支払い</div>
+              <div style="display:flex;gap:6px;margin-bottom:6px">
+                <input id="payAmount" style="flex:1;font-size:18px;padding:10px;text-align:right;font-weight:700" placeholder="金額" type="number">
               </div>
-              <div id="autoExtendBadge" class="badge off">自動延長: OFF</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+                <button class="bigbtn" id="btnPayCash" style="text-align:center;font-size:14px;background:#14532d;border-color:#22c55e;color:#4ade80">現金</button>
+                <button class="bigbtn" id="btnPayCard" style="text-align:center;font-size:14px;background:#1e3a5f;border-color:#3b82f6;color:#93c5fd">カード</button>
+                <button class="bigbtn" id="btnPayQR" style="text-align:center;font-size:14px;background:#3b0764;border-color:#a855f7;color:#c084fc">QR</button>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+              <button class="bigbtn solid" id="btnCheckout" style="text-align:center;font-weight:700;font-size:16px">会計確定</button>
+              <button class="bigbtn" id="btnReceipt" style="text-align:center;font-size:14px">領収書</button>
             </div>
             <hr>
-            <div id="billBox" class="muted mono" style="font-size:13px;line-height:1.5"></div>
+            <!-- 伝票（内訳） -->
+            <div id="billBox" class="muted mono" style="font-size:12px;line-height:1.6"></div>
           </div>
 
           <!-- 数量管理：各カテゴリ 0スタート + / - -->
           <div id="pane-drink">
+            <div style="margin-bottom:10px;padding:8px;border:1px solid #2a384f;border-radius:10px;background:#0a1624">
+              <div style="font-size:12px;color:var(--muted);margin-bottom:4px">ドリンクバック対象キャスト</div>
+              <select id="drinkCastSelect" style="width:100%;font-size:15px;padding:8px 10px;border-radius:8px;border:1px solid #263244;background:var(--card);color:var(--text)">
+                <option value="">なし（お客様用）</option>
+              </select>
+            </div>
             <div id="listDrink" class="grid"></div>
             <div class="row" style="justify-content:flex-end;margin-top:10px">
-              <button class="btn" id="applyDrink">ドリンク反映</button>
+              <button class="btn solid" id="applyDrink" style="font-size:15px;padding:10px 20px">注文確定</button>
             </div>
           </div>
           <div id="pane-bottle">
             <div id="listBottle" class="grid"></div>
             <div class="row" style="justify-content:flex-end;margin-top:10px">
-              <button class="btn" id="applyBottle">ボトル反映</button>
+              <button class="btn solid" id="applyBottle" style="font-size:15px;padding:10px 20px">注文確定</button>
             </div>
           </div>
           <div id="pane-food">
             <div id="listFood" class="grid"></div>
             <div class="row" style="justify-content:flex-end;margin-top:10px">
-              <button class="btn" id="applyFood">フード反映</button>
+              <button class="btn solid" id="applyFood" style="font-size:15px;padding:10px 20px">注文確定</button>
             </div>
           </div>
 
@@ -843,7 +1218,10 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
     <div class="card">
       <h3>今日の売上</h3>
       <div class="cbody">
-        <div class="kv"><div class="muted">Total</div><div class="mono" id="salesToday">-</div></div>
+        <div class="kv"><div class="muted">確定</div><div class="mono" id="salesConfirmed" style="color:#22c55e;font-size:18px;font-weight:700">-</div></div>
+        <div class="kv"><div class="muted">見込み(含open)</div><div class="mono" id="salesToday">-</div></div>
+        <div class="kv"><div class="muted">組数</div><div class="mono" id="salesSessions">-</div></div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px" id="wsStatus">WS: 接続中...</div>
       </div>
     </div>
   </aside>
@@ -856,6 +1234,18 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
 const $ = (id)=>document.getElementById(id);
 const role = ()=> $('role').value;
 const store = ()=> parseInt($('storeId').value||'1',10);
+
+/* 管理ナビの表示切替（owner/managerのみ） */
+function updateAdminNav(){
+  const nav=$('adminNav');
+  if(!nav)return;
+  const r=role();
+  nav.style.display=(r==='owner'||r==='manager')?'flex':'none';
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  updateAdminNav();
+  $('role')?.addEventListener('change', updateAdminNav);
+});
 
 let selectedTableId = null;
 let currentSessionId = null;
@@ -909,10 +1299,17 @@ function reflectAutoExtendBtn(){
 
 /* テーブル色 */
 function colorClass(remain, bill){
-  if (bill && (bill.due||0) <= 0 && remain >= 0) return 't-paid';
+  if (bill && bill.status === 'closed') return 't-paid';
+  if (bill && (bill.due||0) <= 0 && bill.paid > 0) return 't-paid';
   if (remain < 0) return 't-over';
-  if (remain <= 15) return 't-warn';
+  if (remain <= 10) return 't-warn';
   return 't-ok';
+}
+
+/* フロア時計 */
+function updateFloorClock(){
+  const el=$('floorClock');
+  if(el) el.textContent=new Date().toLocaleTimeString('ja-JP',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
 
 /* フロア描画 */
@@ -946,8 +1343,10 @@ async function loadFloor(){
       const elapsed=liveElapsed(baseElapsed, b?._fetchedAt);
       const booked=b?(b.booked_minutes ?? 60):60;
       const remain=booked-elapsed;
+      const guests=b?(b.guest_count||1):1;
+      const total=b?Math.round(b.total||0):0;
       center=`<div class="ttime mono" id="ttime-${t.id}">${remain>=0?`残り ${remain}分`:`超過 ${Math.abs(remain)}分`}</div>
-              <div class="small mono" id="tdetail-${t.id}">経過 ${elapsed} / 予約 ${booked}</div>`;
+              <div class="small mono" id="tdetail-${t.id}">${guests}名 ¥${total.toLocaleString()}</div>`;
       el.className='table '+colorClass(remain,b);
     }
     el.innerHTML=`<div class="name">${t.name}</div>${center}`;
@@ -983,11 +1382,23 @@ function floorTick(){
     const booked=b.booked_minutes ?? 60;
     const remain=booked-elapsed;
     const tt=$('ttime-'+tid), td=$('tdetail-'+tid);
+    const guests=b.guest_count||1;
+    const total=Math.round(b.total||0);
     if(tt) tt.textContent= remain>=0?`残り ${remain}分`:`超過 ${Math.abs(remain)}分`;
-    if(td) td.textContent= `経過 ${elapsed} / 予約 ${booked}`;
+    if(td) td.textContent= `${guests}名 ¥${total.toLocaleString()}`;
     el.classList.remove('t-free','t-ok','t-warn','t-over','t-paid');
     el.classList.add(colorClass(remain,b));
   });
+}
+
+/* キャスト読み込み（ドリンクバック用セレクト） */
+async function loadCasts(){
+  try{
+    const sel=$('drinkCastSelect'); if(!sel) return;
+    const casts = await api(`/casts?store_id=${store()}`);
+    sel.innerHTML='<option value="">なし（お客様用）</option>';
+    casts.forEach(c=>{ sel.innerHTML+=`<option value="${c.id}">${c.name}</option>`; });
+  }catch{}
 }
 
 /* アイテム読み込み：数量UI（0スタート） */
@@ -1039,21 +1450,44 @@ async function applyCategory(cat){
     });
   }catch{}
 
+  // ドリンクの場合はキャスト選択を取得
+  let castId = null;
+  if (cat === 'drink') {
+    const sel = $('drinkCastSelect');
+    castId = sel ? (parseInt(sel.value) || null) : null;
+  }
+
   // 反映：ここでは「指定数を新規で追加」＋ 減算は cancel API を試行
   for (const [itemIdStr, qty] of entries){
     const itemId = parseInt(itemIdStr,10);
     if (qty>0){
       for (let i=0;i<qty;i++){
-        await api(`/sessions/${currentSessionId}/orders`, {method:'POST', body:{store_id:store(), item_id:itemId, qty:1}});
+        const body = {store_id:store(), item_id:itemId, qty:1};
+        if (castId) body.cast_id = castId;
+        await api(`/sessions/${currentSessionId}/orders`, {method:'POST', body});
       }
     }else if (qty===0){
     // 0は何もしない
     }
   }
 
-  // 減算UI（0未満にはしない運用なので、実際の取り消しは別APIで個別に対応）
-  // もし「取り消し」を実運用する場合は、下の cancelItems を有効に
-  toast('反映しました'); await refreshBill(); await loadFloor();
+  // 反映後にカウンタをリセット
+  Object.keys(qtyState[cat]).forEach(k=>{ qtyState[cat][k]=0; const el=$('q-'+cat+'-'+k); if(el) el.textContent='0'; });
+  toast('注文を反映しました'); await refreshBill(); await loadFloor(); refreshSales();
+}
+
+/* 支払い（方法指定） */
+async function payMethod(method){
+  if (!currentSessionId) throw new Error('セッションがありません');
+  const v=$('payAmount').value;
+  let amt;
+  if(v){ amt=parseInt(v.replace(/,/g,''),10); }
+  else if(currentBill){ amt=Math.round(currentBill.due||0); }
+  else{ amt=0; }
+  if(!amt||amt<=0) return toast('金額を入力してください','err');
+  await api(`/sessions/${currentSessionId}/payments`,{method:'POST', body:{store_id:store(), method:method, amount:amt}});
+  toast(`${method==='cash'?'現金':method==='card'?'カード':'QR'} ¥${amt.toLocaleString()} を記録`);
+  $('payAmount').value=''; await refreshBill(); await loadFloor(); refreshSales();
 }
 
 /* 入店/延長/取消/支払い/会計 */
@@ -1063,15 +1497,16 @@ async function checkin(){
     if (t.length){ selectedTableId=t[0].id; $('selTable').textContent=t[0].name; }
   }
   if (!selectedTableId) throw new Error('テーブルを選択してください');
-  const s = await api('/sessions',{method:'POST', body:{store_id:store(), table_id:selectedTableId, guest_count:1, set_minutes:60, extend_unit:30}});
+  const gc=parseInt($('guestCount')?.value||'1',10)||1;
+  const s = await api('/sessions',{method:'POST', body:{store_id:store(), table_id:selectedTableId, guest_count:gc, set_minutes:60, extend_unit:30}});
   currentSessionId=s.id; $('selSess').textContent=s.id;
   autoExtendBySession[s.id]=false; reflectAutoExtendBtn();
-  toast('入店しました'); await refreshBill(); await loadFloor(); startLoops();
+  toast('入店しました'); await refreshBill(); await loadFloor(); refreshSales(); startLoops();
 }
 async function extend30(){
   if (!currentSessionId) throw new Error('セッションがありません');
   await api(`/sessions/${currentSessionId}/extend`, {method:'POST'});
-  toast('+30分 延長しました'); await refreshBill(); await loadFloor();
+  toast('+30分 延長しました'); await refreshBill(); await loadFloor(); refreshSales();
 }
 async function unextend30(){
   if (!currentSessionId) throw new Error('セッションがありません');
@@ -1097,20 +1532,20 @@ async function cancelCheckin(){
     return;
   }
   currentSessionId=null; $('selSess').textContent='-'; reflectAutoExtendBtn();
-  renderTimer(null); renderBill(null); await loadFloor();
+  renderTimer(null); renderBill(null); await loadFloor(); refreshSales();
 }
 
 async function payCash(amount){
   if (!currentSessionId) throw new Error('セッションがありません');
   await api(`/sessions/${currentSessionId}/payments`,{method:'POST', body:{store_id:store(), method:'cash', amount:Number(amount)}});
-  toast('支払いを記録しました'); $('payAmount').value=''; await refreshBill(); await loadFloor();
+  toast('支払いを記録しました'); $('payAmount').value=''; await refreshBill(); await loadFloor(); refreshSales();
 }
 async function checkout(){
   if (!currentSessionId) throw new Error('セッションがありません');
   try{ await api(`/sessions/${currentSessionId}/checkout`, {method:'POST'}); toast('会計を確定しました'); }
   catch(e){ console.warn(e); toast('会計API未実装の可能性（UIは続行）','err'); }
   currentSessionId=null; $('selSess').textContent='-'; reflectAutoExtendBtn();
-  renderTimer(null); renderBill(null); await loadFloor();
+  renderTimer(null); renderBill(null); await loadFloor(); refreshSales();
 }
 
 /* 明細＆サイドタイマー */
@@ -1122,42 +1557,102 @@ async function refreshBill(){
 }
 function toYen(v){ return `${Math.round(v||0).toLocaleString()} 円`; }
 function renderTimer(b){
-  const nowStr=new Date().toLocaleTimeString('ja-JP',{hour12:false,hour:'2-digit',minute:'2-digit'});
-  if (!b){ $('timerText').textContent='--:--'; $('timerDetail').textContent='経過 - / 予約 - / 残り -'; return; }
+  const card=$('timerCard');
+  if (!b){ if(card) card.style.display='none'; return; }
+  if(card) card.style.display='block';
   const base=b.elapsed_minutes ?? b?.time_breakdown?.total_minutes ?? 0;
   const elapsed=liveElapsed(base, b._fetchedAt);
   const booked=b.booked_minutes ?? 60;
   const remain=booked-elapsed;
-  $('timerText').textContent=nowStr;
-  $('timerDetail').textContent=`経過 ${elapsed}分 / 予約 ${booked}分 / ${remain>=0?`残り ${remain}`:`残り -${Math.abs(remain)}`}分`;
+  const tr=$('timerRemain');
+  if(tr){
+    tr.textContent=remain>=0?remain:`-${Math.abs(remain)}`;
+    tr.style.color=remain<0?'#ef4444':remain<=10?'#facc15':'#22c55e';
+  }
+  const td=$('timerDetail');
+  if(td) td.textContent=`経過 ${elapsed}分 / 予約 ${booked}分`;
+  // プログレスバー
+  const pct=Math.min(100, Math.max(0, elapsed/booked*100));
+  const fill=$('timerBarFill');
+  if(fill){
+    fill.style.width=pct+'%';
+    fill.style.background=pct>=100?'#ef4444':pct>=80?'#facc15':'#22c55e';
+  }
+  // 残り5分以下で点滅アラート
+  if(remain<=5 && remain>0 && remain%1===0){
+    if(card) card.style.borderColor=Date.now()%2000<1000?'#ef4444':'transparent';
+  }else if(remain<0){
+    if(card) card.style.borderColor='#ef4444';
+  }else{
+    if(card) card.style.borderColor='transparent';
+  }
 }
 function renderBill(b){
   const box=$('billBox'); if(!box) return;
   if (!b){ box.innerHTML=''; return; }
   const td=b.time_breakdown||{};
-  const row=(l,r)=>`<div class="row" style="justify-content:space-between"><span>${l}</span><span class="mono">${r}</span></div>`;
-  box.innerHTML=[
-    row('小計', toYen(b.subtotal)),
-    row('サービス料', toYen(b.service_fee||0)),
-    row('消費税', toYen(b.tax)),
-    row('合計', toYen(b.total)),
-    row('支払済', toYen(b.paid)),
-    row('未収', `<b>${toYen(b.due)}</b>`),
-    `<div class="muted" style="margin-top:6px">時間内訳: ${toYen(td.time_amount||0)}（セット/延長）</div>`
-  ].join('');
+  const row=(l,r,cls)=>`<div class="kv"><span>${l}</span><span class="mono${cls?' '+cls:''}">${r}</span></div>`;
+  const lines = [];
+
+  // 注文一覧
+  if(b.orders&&b.orders.length){
+    lines.push(`<div style="margin-bottom:6px">`);
+    b.orders.forEach(o=>{
+      lines.push(`<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;border-bottom:1px dotted #1f2937">
+        <span>${o.name}${o.qty>1?' x'+o.qty:''}</span><span>¥${Math.round(o.amount).toLocaleString()}</span></div>`);
+    });
+    lines.push(`</div>`);
+  }
+
+  lines.push(row('セット/延長', toYen(td.time_amount||0)));
+  if(b.order_subtotal>0) lines.push(row('オーダー小計', toYen(b.order_subtotal)));
+  if (b.table_charge > 0) lines.push(row('お通し/TC', toYen(b.table_charge)));
+  if (b.vip_fee > 0)      lines.push(row('VIP席料', toYen(b.vip_fee)));
+  if (b.night_surcharge > 0) lines.push(row('深夜加算', toYen(b.night_surcharge)));
+  lines.push(`<hr>`);
+  lines.push(row('小計', toYen(b.subtotal)));
+  if(b.service_fee) lines.push(row('SC', toYen(b.service_fee)));
+  lines.push(row('税', toYen(b.tax)));
+  lines.push(`<div class="kv" style="font-size:16px;font-weight:900;margin:8px 0"><span>合計</span><span class="mono">${toYen(b.total)}</span></div>`);
+  if(b.paid>0) lines.push(row('支払済', toYen(b.paid)));
+  if(b.due>0) lines.push(`<div class="kv" style="font-weight:700"><span style="color:#ef4444">未収</span><span class="mono" style="color:#ef4444;font-size:16px">${toYen(b.due)}</span></div>`);
+  box.innerHTML = lines.join('');
+
+  // 支払額にデフォルト値をセット
+  const pa=$('payAmount');
+  if(pa && !pa.value && b.due>0) pa.placeholder=`¥${Math.round(b.due).toLocaleString()}`;
 }
 
-/* 今日の売上（完全自動） */
+/* 今日の売上（注文/取消/会計で即時反映） */
 async function refreshSales(){
   try{
     const d=await api(`/closing?store_id=${store()}`);
-    const prefer=['total_sales','today_total','total','sales','amount','sum'];
-    let val=0; for(const k of prefer){ if(typeof d?.[k]==='number'){ val=d[k]; break; } }
-    if(!val){
-      const pick=o=>!o||typeof o!=='object'?0:(Object.values(o).reduce((r,v)=>r||(typeof v==='number'?v:pick(v)),0));
-      val=pick(d);
-    }
-    $('salesToday').textContent=Number(val||0).toLocaleString();
+    $('salesConfirmed').textContent=(d.confirmed_sales||0).toLocaleString()+' 円';
+    $('salesToday').textContent=(d.total_sales||0).toLocaleString()+' 円';
+    $('salesSessions').textContent=`${d.closed_count||0}組確定 / ${d.open_count||0}組open`;
+  }catch{}
+}
+
+/* WebSocket: 他端末からの変更通知で自動リフレッシュ */
+let _ws=null;
+function connectWS(){
+  try{
+    const proto=location.protocol==='https:'?'wss:':'ws:';
+    _ws=new WebSocket(`${proto}//${location.host}/ws`);
+    _ws.onopen=()=>{ if($('wsStatus')) $('wsStatus').textContent='WS: 接続済 ✓'; };
+    _ws.onclose=()=>{ if($('wsStatus')) $('wsStatus').textContent='WS: 切断'; setTimeout(connectWS,3000); };
+    _ws.onerror=()=>{ _ws.close(); };
+    _ws.onmessage=(ev)=>{
+      try{
+        const msg=JSON.parse(ev.data);
+        // 他端末からの変更通知 → 売上&フロアを即時更新
+        if(['order','cancel_order','payment','checkout','cancel_session','extend','checkin'].includes(msg.event)){
+          refreshSales();
+          loadFloor();
+          if(currentSessionId) refreshBill();
+        }
+      }catch{}
+    };
   }catch{}
 }
 
@@ -1177,9 +1672,9 @@ async function autoExtendTick(){
 /* ループ */
 function startLoops(){
   ['tick','bill','sales','floor','floorTick'].forEach(k=>{ if(loops[k]) clearInterval(loops[k]); });
-  loops.tick=setInterval(()=>{ if(currentBill) renderTimer(currentBill); autoExtendTick(); },1000);
+  loops.tick=setInterval(()=>{ if(currentBill) renderTimer(currentBill); autoExtendTick(); updateFloorClock(); },1000);
   loops.bill=setInterval(()=>{ if(currentSessionId) refreshBill().catch(()=>{}); },5000);
-  loops.sales=setInterval(refreshSales,1000);
+  loops.sales=setInterval(refreshSales,10000); // WS補完用（10秒ごと）
   loops.floor=setInterval(()=>loadFloor().catch(()=>{}),5000);
   loops.floorTick=setInterval(floorTick,1000);
 }
@@ -1196,15 +1691,81 @@ async function initUI(){
   $('btnExtend30').addEventListener('click', ()=>extend30().catch(e=>toast(e.message,'err')));
   $('btnUnextend').addEventListener('click', ()=>unextend30().catch(e=>toast(e.message,'err')));
   $('btnAutoExtend').addEventListener('click', toggleAutoExtend);
-  $('btnCancelCheckin').addEventListener('click', ()=>cancelCheckin().catch(e=>toast(e.message,'err')));
-
-  // 支払い
-  $('btnPayCash').addEventListener('click', ()=>{
-    const v=$('payAmount').value||'1000';
-    const amt=parseInt(v.replace(/,/g,''),10)||1000;
-    payCash(amt).catch(e=>toast(e.message,'err'));
+  $('btnCancelCheckin').addEventListener('click', ()=>{
+    if(!currentSessionId) return toast('セッションがありません','err');
+    if(!confirm('この入店を取り消しますか？注文も全て削除されます。')) return;
+    cancelCheckin().catch(e=>toast(e.message,'err'));
   });
-  $('btnCheckout').addEventListener('click', ()=>checkout().catch(e=>toast(e.message,'err')));
+
+  // 支払い（3方法）
+  $('btnPayCash').addEventListener('click', ()=>payMethod('cash').catch(e=>toast(e.message,'err')));
+  $('btnPayCard').addEventListener('click', ()=>payMethod('card').catch(e=>toast(e.message,'err')));
+  $('btnPayQR').addEventListener('click', ()=>payMethod('qr').catch(e=>toast(e.message,'err')));
+  // 会計確定（確認ダイアログ付き）
+  $('btnCheckout').addEventListener('click', ()=>{
+    if(!currentSessionId) return toast('セッションがありません','err');
+    const due=currentBill?Math.round(currentBill.due||0):0;
+    if(due>0){ if(!confirm(`未収 ¥${due.toLocaleString()} がありますが、会計を確定しますか？`)) return; }
+    checkout().catch(e=>toast(e.message,'err'));
+  });
+
+  // 領収書印刷
+  $('btnReceipt')?.addEventListener('click', async ()=>{
+    const sid = currentSessionId;
+    if (!sid) return toast('セッションを選択してください','err');
+    try{
+      const d = await api(`/sessions/${sid}/receipt`);
+      const b = d.bill, st = d.store;
+      const now = new Date().toLocaleString('ja-JP');
+      const rows = (b.orders||[]).map(o=>
+        `<tr><td>${o.name}</td><td style="text-align:right">¥${Math.round(o.amount).toLocaleString()}</td></tr>`
+      ).join('');
+      const w = window.open('','_blank','width=400,height=600');
+      w.document.write(`<!doctype html><html><head><meta charset="utf-8">
+        <title>領収書</title>
+        <style>body{font-family:sans-serif;font-size:13px;padding:20px;color:#111}
+        h2{text-align:center;font-size:18px;border-bottom:2px solid #000;padding-bottom:8px}
+        table{width:100%;border-collapse:collapse;margin:10px 0}
+        td,th{padding:4px 6px}
+        .right{text-align:right}.total{font-size:16px;font-weight:bold;border-top:2px solid #000}
+        .muted{color:#666;font-size:11px}@media print{button{display:none}}</style>
+        </head><body>
+        <h2>領 収 書</h2>
+        <div style="text-align:center;margin-bottom:8px">
+          <div style="font-size:11px;color:#666">${now}</div>
+          <div style="font-size:11px">NO: ${d.invoice_no}</div>
+        </div>
+        <table>
+          <tr><td class="muted">テーブル</td><td>${b.table||''}</td></tr>
+          <tr><td class="muted">人数</td><td>${b.guest_count}名</td></tr>
+          <tr><td class="muted">入店</td><td>${new Date(b.start_time).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}</td></tr>
+        </table>
+        <table><tr><th style="text-align:left">品目</th><th style="text-align:right">金額</th></tr>
+          <tr><td>セット料金</td><td class="right">¥${Math.round(b.time_breakdown?.time_amount||0).toLocaleString()}</td></tr>
+          ${b.table_charge>0?`<tr><td>お通し/TC</td><td class="right">¥${Math.round(b.table_charge).toLocaleString()}</td></tr>`:''}
+          ${b.vip_fee>0?`<tr><td>VIP席料</td><td class="right">¥${Math.round(b.vip_fee).toLocaleString()}</td></tr>`:''}
+          ${rows}
+          ${b.night_surcharge>0?`<tr><td>深夜加算</td><td class="right">¥${Math.round(b.night_surcharge).toLocaleString()}</td></tr>`:''}
+          <tr><td>小計</td><td class="right">¥${Math.round(b.subtotal).toLocaleString()}</td></tr>
+          <tr><td>サービス料</td><td class="right">¥${Math.round(b.service_fee).toLocaleString()}</td></tr>
+          <tr><td>消費税</td><td class="right">¥${Math.round(b.tax).toLocaleString()}</td></tr>
+          <tr class="total"><td>合 計</td><td class="right">¥${Math.round(b.total).toLocaleString()}</td></tr>
+          <tr><td>お支払い済み</td><td class="right">¥${Math.round(b.paid).toLocaleString()}</td></tr>
+          <tr><td>お釣り</td><td class="right">¥${Math.max(0,Math.round(b.paid-b.total)).toLocaleString()}</td></tr>
+        </table>
+        <div style="margin-top:16px;text-align:center;font-size:11px;color:#666">
+          <div>${st.legal_name||''}</div>
+          <div>${st.address||''}</div>
+          <div>TEL: ${st.tel||''}</div>
+          ${st.invoice_reg_no?`<div>登録番号: ${st.invoice_reg_no}</div>`:''}
+        </div>
+        <div style="text-align:center;margin-top:12px">
+          <button onclick="window.print()" style="padding:8px 20px;font-size:14px">印刷</button>
+        </div>
+        </body></html>`);
+      w.document.close();
+    }catch(e){toast('領収書エラー: '+e.message,'err')}
+  });
 
   // 数量反映
   $('applyDrink').addEventListener('click', ()=>applyCategory('drink').catch(e=>toast(e.message,'err')));
@@ -1213,6 +1774,7 @@ async function initUI(){
 
   await loadFloor();
   await loadItems();
+  await loadCasts();
 
   try{
     const sess=await api(`/sessions?store_id=${store()}&status=open`);
@@ -1223,6 +1785,28 @@ async function initUI(){
 
   startLoops();
   refreshSales();
+  connectWS();
+
+  // サブスク状態チェック（未払いなら警告）
+  try{
+    const sub=await fetch('/stripe/status?store_id='+store(),{headers:{'X-Role':role()}});
+    if(sub.ok){
+      const sd=await sub.json();
+      if(sd.status&&sd.status!=='active'&&sd.status!=='trialing'){
+        $('subModal').style.display='flex';
+      }
+    }
+  }catch{}
+
+  // キーボードショートカット
+  document.addEventListener('keydown',(e)=>{
+    if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT') return;
+    if(e.key==='1') document.querySelector('[data-tab="entry"]')?.click();
+    if(e.key==='2') document.querySelector('[data-tab="drink"]')?.click();
+    if(e.key==='3') document.querySelector('[data-tab="bottle"]')?.click();
+    if(e.key==='4') document.querySelector('[data-tab="food"]')?.click();
+    if(e.key==='Enter'&&e.ctrlKey){e.preventDefault(); $('btnCheckout')?.click();}
+  });
 }
 
 /* トースト */
@@ -1238,3 +1822,48 @@ document.addEventListener('DOMContentLoaded', initUI);
 </body>
 </html>
 """)
+
+# ---------- 監査ログ UI ----------
+@app.get("/ui/audit", response_class=HTMLResponse)
+def ui_audit():
+    return HTMLResponse("""<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>監査ログ</title>
+<style>
+:root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#b0bec5;--accent:#0ea5e9}
+*{box-sizing:border-box;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
+body{margin:0;background:var(--bg);color:var(--text);padding:20px}
+h1{font-size:22px;margin-bottom:16px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
+th{background:#111827;font-size:11px;color:var(--muted);position:sticky;top:0}
+.method{display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700}
+.POST{background:#14532d;color:#4ade80}.DELETE{background:#7f1d1d;color:#fca5a5}
+.PATCH{background:#713f12;color:#fcd34d}.PUT{background:#1e3a5f;color:#93c5fd}
+a{color:var(--accent)}
+.toolbar{display:flex;gap:10px;margin-bottom:16px;align-items:center}
+</style></head><body>
+<h1>📋 監査ログ</h1>
+<div class="toolbar">
+  <span style="color:var(--muted);font-size:13px">変更操作の全記録（POST/PUT/PATCH/DELETE）</span>
+  <a href="/ui" style="margin-left:auto;font-size:13px">← POS に戻る</a>
+</div>
+<table>
+<thead><tr><th>日時</th><th>ロール</th><th>メソッド</th><th>パス</th><th>詳細</th><th>IP</th></tr></thead>
+<tbody id="list"></tbody>
+</table>
+<script>
+async function load(){
+  const r=await fetch('/audit-logs?limit=200',{headers:{'X-Role':'owner'}});
+  const data=await r.json();
+  document.getElementById('list').innerHTML=data.map(l=>`<tr>
+    <td style="white-space:nowrap;font-size:11px">${l.ts}</td>
+    <td>${l.role||'-'}</td>
+    <td><span class="method ${l.method}">${l.method}</span></td>
+    <td style="font-family:monospace;font-size:11px">${l.path}</td>
+    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--muted)">${l.payload||''}</td>
+    <td style="font-size:11px">${l.ip||''}</td>
+  </tr>`).join('');
+}
+load(); setInterval(load,10000);
+</script></body></html>""")
