@@ -1,0 +1,305 @@
+"""tab_management.py — 伝票（ツケ）管理
+未払い伝票の一覧、回収状況追跡、期限アラート
+"""
+
+from datetime import datetime, date, timedelta
+from typing import Optional, List
+from fastapi import APIRouter, HTTPException, Header, Query
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+from sqlalchemy import Column, Integer, String, DateTime, Float, Boolean, Text, ForeignKey
+
+from db_shared import Base, SessionLocal, require_role
+
+router = APIRouter(tags=["tab_management"])
+ALL_ROLES = ["owner", "manager", "cashier", "staff"]
+ADMIN_ROLES = ["owner", "manager"]
+
+# ---------- Model ----------
+class TabRecord(Base):
+    __tablename__ = "tab_records"
+    id = Column(Integer, primary_key=True)
+    store_id = Column(Integer, index=True)
+    customer_name = Column(String, default="")
+    phone = Column(String, default="")
+    session_id = Column(Integer, nullable=True)
+    total_amount = Column(Float, default=0)
+    paid_amount = Column(Float, default=0)
+    status = Column(String, default="open")  # open / partial / paid / overdue
+    due_date = Column(String, default="")  # YYYY-MM-DD
+    memo = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    paid_at = Column(DateTime, nullable=True)
+
+class TabPayment(Base):
+    __tablename__ = "tab_payments"
+    id = Column(Integer, primary_key=True)
+    tab_id = Column(Integer, ForeignKey("tab_records.id"), index=True)
+    amount = Column(Float, default=0)
+    method = Column(String, default="cash")  # cash / card / transfer
+    paid_at = Column(DateTime, default=datetime.utcnow)
+    memo = Column(String, default="")
+
+# ---------- Schemas ----------
+class TabIn(BaseModel):
+    store_id: int
+    customer_name: str
+    phone: str = ""
+    session_id: Optional[int] = None
+    total_amount: float
+    due_days: int = 30
+    memo: str = ""
+
+class TabPaymentIn(BaseModel):
+    amount: float
+    method: str = "cash"
+    memo: str = ""
+
+# ---------- API ----------
+@router.post("/tabs")
+def create_tab(payload: TabIn, x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ALL_ROLES)
+    db = SessionLocal()
+    try:
+        today = date.today()
+        t = TabRecord(
+            store_id=payload.store_id,
+            customer_name=payload.customer_name,
+            phone=payload.phone,
+            session_id=payload.session_id,
+            total_amount=payload.total_amount,
+            due_date=(today + timedelta(days=payload.due_days)).isoformat(),
+            memo=payload.memo,
+        )
+        db.add(t); db.commit(); db.refresh(t)
+        return _to_dict(t, db)
+    finally:
+        db.close()
+
+@router.get("/tabs")
+def list_tabs(
+    store_id: int,
+    status: Optional[str] = None,
+    x_role: Optional[str] = Header(None, alias="X-Role"),
+):
+    require_role(x_role, ALL_ROLES)
+    db = SessionLocal()
+    try:
+        q = db.query(TabRecord).filter_by(store_id=store_id)
+        if status:
+            q = q.filter_by(status=status)
+        rows = q.order_by(TabRecord.due_date.asc()).all()
+        today_str = date.today().isoformat()
+        for r in rows:
+            if r.status == "open" and r.due_date and r.due_date < today_str:
+                r.status = "overdue"
+        db.commit()
+        return [_to_dict(r, db) for r in rows]
+    finally:
+        db.close()
+
+@router.get("/tab-summary")
+def tab_summary(store_id: int, x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
+    db = SessionLocal()
+    try:
+        tabs = db.query(TabRecord).filter(
+            TabRecord.store_id == store_id,
+            TabRecord.status.in_(["open", "partial", "overdue"]),
+        ).all()
+        total_outstanding = sum(t.total_amount - (t.paid_amount or 0) for t in tabs)
+        overdue_count = sum(1 for t in tabs if t.status == "overdue")
+        return {
+            "total_outstanding": total_outstanding,
+            "open_count": len(tabs),
+            "overdue_count": overdue_count,
+        }
+    finally:
+        db.close()
+
+@router.get("/tabs/{tab_id}")
+def get_tab(tab_id: int, x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ALL_ROLES)
+    db = SessionLocal()
+    try:
+        t = db.get(TabRecord, tab_id)
+        if not t: raise HTTPException(404, "Tab not found")
+        return _to_dict(t, db)
+    finally:
+        db.close()
+
+@router.post("/tabs/{tab_id}/pay")
+def pay_tab(tab_id: int, payload: TabPaymentIn, x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ALL_ROLES)
+    db = SessionLocal()
+    try:
+        t = db.get(TabRecord, tab_id)
+        if not t: raise HTTPException(404, "Tab not found")
+        tp = TabPayment(tab_id=tab_id, amount=payload.amount, method=payload.method, memo=payload.memo)
+        db.add(tp)
+        t.paid_amount = (t.paid_amount or 0) + payload.amount
+        if t.paid_amount >= t.total_amount:
+            t.status = "paid"
+            t.paid_at = datetime.utcnow()
+        else:
+            t.status = "partial"
+        db.commit()
+        return _to_dict(t, db)
+    finally:
+        db.close()
+
+def _to_dict(t: TabRecord, db) -> dict:
+    today_str = date.today().isoformat()
+    days_left = None
+    if t.due_date:
+        try:
+            days_left = (date.fromisoformat(t.due_date) - date.today()).days
+        except Exception:
+            pass
+    payments = db.query(TabPayment).filter_by(tab_id=t.id).order_by(TabPayment.paid_at.desc()).all()
+    remaining = t.total_amount - (t.paid_amount or 0)
+    return {
+        "id": t.id, "store_id": t.store_id,
+        "customer_name": t.customer_name, "phone": t.phone,
+        "session_id": t.session_id,
+        "total_amount": t.total_amount,
+        "paid_amount": t.paid_amount or 0,
+        "remaining": remaining,
+        "status": t.status, "due_date": t.due_date,
+        "days_left": days_left,
+        "is_overdue": t.status == "overdue" or (days_left is not None and days_left < 0),
+        "memo": t.memo,
+        "created_at": t.created_at.isoformat() if t.created_at else "",
+        "payments": [{"id":p.id,"amount":p.amount,"method":p.method,"paid_at":p.paid_at.isoformat() if p.paid_at else "","memo":p.memo} for p in payments],
+    }
+
+# ---------- UI ----------
+@router.get("/ui/tabs", response_class=HTMLResponse)
+def ui_tabs():
+    return HTMLResponse("""<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>伝票（ツケ）管理</title>
+<style>
+:root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#b0bec5;--accent:#0ea5e9}
+*{box-sizing:border-box;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
+body{margin:0;background:var(--bg);color:var(--text);padding:20px}
+h1{font-size:22px;margin-bottom:16px}
+.summary{display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+.scard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 20px;min-width:180px}
+.scard .label{font-size:12px;color:var(--muted)}
+.scard .val{font-size:24px;font-weight:700;margin-top:4px}
+.scard .val.danger{color:#ef4444}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
+input,select{font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--text)}
+.btn{cursor:pointer;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:#111827;color:var(--text);font-size:14px}
+.btn.solid{background:var(--accent);border-color:var(--accent);color:#001018}
+.btn.pay{background:#14532d;border-color:#22c55e;color:#4ade80}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left}
+th{background:#111827;font-size:12px;color:var(--muted)}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px}
+.badge.open{background:#1e3a5f;color:#93c5fd}
+.badge.partial{background:#713f12;color:#fcd34d}
+.badge.paid{background:#14532d;color:#4ade80}
+.badge.overdue{background:#7f1d1d;color:#fca5a5}
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;align-items:center;justify-content:center}
+.modal-bg.show{display:flex}
+.modal{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px;min-width:380px;max-width:500px}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+.field input,.field textarea{width:100%}
+a{color:var(--accent)}
+</style></head><body>
+<h1>📝 伝票（ツケ）管理</h1>
+<div class="summary" id="summary"></div>
+<div class="toolbar">
+  <select id="filterStatus"><option value="">全件</option><option value="open">未払い</option><option value="partial">一部回収</option><option value="overdue">期限超過</option><option value="paid">回収済</option></select>
+  <button class="btn solid" onclick="showAdd()">+ 新規伝票</button>
+  <a href="/ui" style="margin-left:auto;font-size:13px">← POS に戻る</a>
+</div>
+<table>
+<thead><tr><th>顧客名</th><th>電話</th><th>金額</th><th>回収済</th><th>残額</th><th>期限</th><th>状態</th><th>操作</th></tr></thead>
+<tbody id="list"></tbody>
+</table>
+
+<div class="modal-bg" id="addModal">
+<div class="modal">
+<h2>新規伝票</h2>
+<div class="field"><label>顧客名</label><input id="fCust"></div>
+<div class="field"><label>電話番号</label><input id="fPhone"></div>
+<div class="field"><label>金額</label><input id="fAmount" type="number"></div>
+<div class="field"><label>回収期限（日数）</label><input id="fDays" type="number" value="30"></div>
+<div class="field"><label>メモ</label><textarea id="fMemo" style="min-height:60px;resize:vertical"></textarea></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+<button class="btn" onclick="closeM('addModal')">キャンセル</button>
+<button class="btn solid" onclick="saveNew()">保存</button>
+</div></div></div>
+
+<div class="modal-bg" id="payModal">
+<div class="modal">
+<h2>回収記録</h2>
+<div class="field"><label>回収金額</label><input id="pAmount" type="number"></div>
+<div class="field"><label>方法</label><select id="pMethod"><option value="cash">現金</option><option value="card">カード</option><option value="transfer">振込</option></select></div>
+<div class="field"><label>メモ</label><input id="pMemo"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+<button class="btn" onclick="closeM('payModal')">キャンセル</button>
+<button class="btn pay" onclick="submitPay()">回収記録</button>
+</div></div></div>
+
+<script>
+const storeId=1,role='owner';
+const H={'Content-Type':'application/json','X-Role':role};
+let payTabId=null;
+
+async function loadSummary(){
+  try{
+    const r=await fetch(`/tab-summary?store_id=${storeId}`,{headers:H});
+    const d=await r.json();
+    document.getElementById('summary').innerHTML=`
+      <div class="scard"><div class="label">未回収残高</div><div class="val${d.total_outstanding>0?' danger':''}">¥${Math.round(d.total_outstanding).toLocaleString()}</div></div>
+      <div class="scard"><div class="label">未払い件数</div><div class="val">${d.open_count}</div></div>
+      <div class="scard"><div class="label">期限超過</div><div class="val danger">${d.overdue_count}</div></div>`;
+  }catch{}
+}
+
+async function load(){
+  const st=document.getElementById('filterStatus').value;
+  let url=`/tabs?store_id=${storeId}`;
+  if(st) url+=`&status=${st}`;
+  const r=await fetch(url,{headers:H}); const data=await r.json();
+  document.getElementById('list').innerHTML=data.map(t=>{
+    const badge=t.status;
+    const label={open:'未払い',partial:'一部回収',paid:'回収済',overdue:'期限超過'}[t.status]||t.status;
+    return `<tr${t.is_overdue?' style="background:#1a0e12"':''}>
+      <td>${t.customer_name}</td><td>${t.phone||'-'}</td>
+      <td>¥${Math.round(t.total_amount).toLocaleString()}</td>
+      <td>¥${Math.round(t.paid_amount).toLocaleString()}</td>
+      <td style="font-weight:700${t.remaining>0?';color:#ef4444':''}">¥${Math.round(t.remaining).toLocaleString()}</td>
+      <td>${t.due_date}${t.days_left!=null?' ('+t.days_left+'日)':''}</td>
+      <td><span class="badge ${badge}">${label}</span></td>
+      <td>${t.status!=='paid'?`<button class="btn pay" onclick="showPay(${t.id},${t.remaining})">回収</button>`:''}</td>
+    </tr>`;
+  }).join('');
+}
+
+function showAdd(){document.getElementById('addModal').classList.add('show')}
+function closeM(id){document.getElementById(id).classList.remove('show')}
+function showPay(id,remain){payTabId=id;document.getElementById('pAmount').value=remain;document.getElementById('payModal').classList.add('show')}
+
+async function saveNew(){
+  const body={store_id:storeId,customer_name:document.getElementById('fCust').value,phone:document.getElementById('fPhone').value,
+    total_amount:Number(document.getElementById('fAmount').value),due_days:Number(document.getElementById('fDays').value),memo:document.getElementById('fMemo').value};
+  await fetch('/tabs',{method:'POST',headers:H,body:JSON.stringify(body)});
+  closeM('addModal');load();loadSummary();
+}
+
+async function submitPay(){
+  if(!payTabId)return;
+  const body={amount:Number(document.getElementById('pAmount').value),method:document.getElementById('pMethod').value,memo:document.getElementById('pMemo').value};
+  await fetch(`/tabs/${payTabId}/pay`,{method:'POST',headers:H,body:JSON.stringify(body)});
+  closeM('payModal');payTabId=null;load();loadSummary();
+}
+
+document.getElementById('filterStatus').addEventListener('change',load);
+load();loadSummary();
+</script></body></html>""")

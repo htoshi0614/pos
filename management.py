@@ -1,18 +1,40 @@
 """management.py — Dsystem風マネジメントダッシュボード
-キャスト成績・給率・店舗売上分析 + /ui/management
+キャスト成績・給率・店舗売上分析・指名ランキング・目標設定・
+時間帯別客数ヒートマップ・リピート率分析 + /ui/management
 """
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import Optional, List
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Header, Query
 from fastapi.responses import HTMLResponse
-from sqlalchemy import func
+from pydantic import BaseModel
+from sqlalchemy import Column, Integer, String, Float, DateTime
+from collections import defaultdict
 
 from db_shared import Base, SessionLocal, require_role
 
 JST = ZoneInfo("Asia/Tokyo")
 router = APIRouter(tags=["management"])
 ADMIN_ROLES = ["owner", "manager"]
+
+# ---------- 目標設定モデル ----------
+class CastGoal(Base):
+    __tablename__ = "cast_goals"
+    id = Column(Integer, primary_key=True)
+    store_id = Column(Integer, index=True)
+    cast_id = Column(Integer, index=True)
+    year_month = Column(String, index=True)  # YYYY-MM
+    target_nominations = Column(Integer, default=0)
+    target_sales = Column(Float, default=0)
+    target_attendance = Column(Integer, default=0)
+
+class CastGoalIn(BaseModel):
+    store_id: int
+    cast_id: int
+    year_month: str
+    target_nominations: int = 0
+    target_sales: float = 0
+    target_attendance: int = 0
 
 # ─────────────────────────── キャスト成績分析 ───────────────────────────
 
@@ -209,7 +231,148 @@ def compute_store_analytics(db, store_id: int, year: int, month: int) -> dict:
         "payment_methods": payment_methods,
     }
 
+# ─────────────────────────── 時間帯×曜日 ヒートマップ ───────────────────────────
+
+def compute_heatmap(db, store_id: int, year: int, month: int) -> dict:
+    from pos import Session
+    all_sessions = db.query(Session).filter(
+        Session.store_id == store_id,
+        Session.status == "closed"
+    ).all()
+    month_sessions = [
+        s for s in all_sessions
+        if s.start_time and s.start_time.replace(tzinfo=timezone.utc).astimezone(JST).year == year
+        and s.start_time.replace(tzinfo=timezone.utc).astimezone(JST).month == month
+    ]
+    # 曜日(0=月..6=日) × 時間帯(0-23) → 来客数
+    heatmap = defaultdict(lambda: defaultdict(int))
+    for s in month_sessions:
+        jst = s.start_time.replace(tzinfo=timezone.utc).astimezone(JST)
+        dow = jst.weekday()  # 0=Mon
+        hour = jst.hour
+        heatmap[dow][hour] += s.guest_count
+
+    rows = []
+    for dow in range(7):
+        row = {"dow": dow, "hours": {h: heatmap[dow][h] for h in range(24)}}
+        rows.append(row)
+    return {"heatmap": rows}
+
+# ─────────────────────────── リピート率分析 ───────────────────────────
+
+def compute_repeat_analysis(db, store_id: int, year: int, month: int) -> dict:
+    """新規 vs リピーターの分析（顧客台帳ベース）"""
+    try:
+        from customer_crm import CustomerProfile, VisitLog
+        profiles = db.query(CustomerProfile).filter_by(store_id=store_id).all()
+        ym = f"{year:04d}-{month:02d}"
+
+        new_count = 0
+        repeat_count = 0
+        total_new_spent = 0
+        total_repeat_spent = 0
+
+        for p in profiles:
+            visits = db.query(VisitLog).filter_by(customer_id=p.id).all()
+            month_visits = [v for v in visits if v.visit_date and v.visit_date.startswith(ym)]
+            if not month_visits:
+                continue
+            # 初来店月かどうか
+            if p.first_visit and p.first_visit.startswith(ym):
+                new_count += 1
+                total_new_spent += sum(v.spent for v in month_visits)
+            else:
+                repeat_count += 1
+                total_repeat_spent += sum(v.spent for v in month_visits)
+
+        total = new_count + repeat_count
+        repeat_rate = (repeat_count / total * 100) if total > 0 else 0
+
+        # 再来店サイクル（全顧客の平均来店間隔）
+        intervals = []
+        for p in profiles:
+            visits = db.query(VisitLog).filter_by(customer_id=p.id).order_by(VisitLog.visit_date.asc()).all()
+            dates = sorted(set(v.visit_date for v in visits if v.visit_date))
+            for i in range(1, len(dates)):
+                try:
+                    d1 = date.fromisoformat(dates[i-1])
+                    d2 = date.fromisoformat(dates[i])
+                    intervals.append((d2 - d1).days)
+                except Exception:
+                    pass
+        avg_interval = round(sum(intervals) / len(intervals), 1) if intervals else 0
+
+        return {
+            "new_count": new_count, "repeat_count": repeat_count,
+            "total": total, "repeat_rate": round(repeat_rate, 1),
+            "avg_new_spent": round(total_new_spent / new_count) if new_count > 0 else 0,
+            "avg_repeat_spent": round(total_repeat_spent / repeat_count) if repeat_count > 0 else 0,
+            "avg_revisit_days": avg_interval,
+        }
+    except ImportError:
+        return {"new_count": 0, "repeat_count": 0, "total": 0, "repeat_rate": 0,
+                "avg_new_spent": 0, "avg_repeat_spent": 0, "avg_revisit_days": 0,
+                "note": "customer_crm モジュール未導入"}
+
 # ─────────────────────────── API Routes ───────────────────────────
+
+# 目標設定
+@router.post("/management/goals")
+def set_goal(payload: CastGoalIn, x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
+    db = SessionLocal()
+    try:
+        existing = db.query(CastGoal).filter_by(
+            store_id=payload.store_id, cast_id=payload.cast_id, year_month=payload.year_month
+        ).first()
+        if existing:
+            existing.target_nominations = payload.target_nominations
+            existing.target_sales = payload.target_sales
+            existing.target_attendance = payload.target_attendance
+        else:
+            g = CastGoal(**payload.dict())
+            db.add(g)
+        db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
+@router.get("/management/goals")
+def get_goals(store_id: int, year_month: str, x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
+    db = SessionLocal()
+    try:
+        rows = db.query(CastGoal).filter_by(store_id=store_id, year_month=year_month).all()
+        return [{"cast_id": g.cast_id, "target_nominations": g.target_nominations,
+                 "target_sales": g.target_sales, "target_attendance": g.target_attendance} for g in rows]
+    finally:
+        db.close()
+
+# ヒートマップ
+@router.get("/management/heatmap")
+def api_heatmap(store_id: int, year: int = None, month: int = None,
+                x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
+    now_jst = datetime.now(tz=JST)
+    y = year or now_jst.year; m = month or now_jst.month
+    db = SessionLocal()
+    try:
+        return compute_heatmap(db, store_id, y, m)
+    finally:
+        db.close()
+
+# リピート率
+@router.get("/management/repeat-analysis")
+def api_repeat_analysis(store_id: int, year: int = None, month: int = None,
+                        x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
+    now_jst = datetime.now(tz=JST)
+    y = year or now_jst.year; m = month or now_jst.month
+    db = SessionLocal()
+    try:
+        return compute_repeat_analysis(db, store_id, y, m)
+    finally:
+        db.close()
 
 @router.get("/management/cast-performance")
 def api_cast_performance(store_id: int,
@@ -332,6 +495,9 @@ td.rank-3{color:#cd7f32;font-weight:700}
   <div class="section-tabs">
     <div class="section-tab active" data-sec="cast">キャスト成績</div>
     <div class="section-tab" data-sec="store">店舗売上</div>
+    <div class="section-tab" data-sec="heatmap">ヒートマップ</div>
+    <div class="section-tab" data-sec="repeat">リピート率</div>
+    <div class="section-tab" data-sec="goals">目標設定</div>
   </div>
 
   <!-- ===== キャスト成績 ===== -->
@@ -396,6 +562,51 @@ td.rank-3{color:#cd7f32;font-weight:700}
       <div class="pie-row" id="paymentPie"></div>
     </div>
   </div>
+
+  <!-- ===== ヒートマップ ===== -->
+  <div class="section-pane" id="sec-heatmap">
+    <div class="card">
+      <h2>時間帯 × 曜日 来客ヒートマップ</h2>
+      <div style="overflow-x:auto">
+        <table id="heatmapTable" style="text-align:center">
+          <thead id="heatmapHead"></thead>
+          <tbody id="heatmapBody"></tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;font-size:11px;color:var(--muted)">
+        <span>少</span>
+        <div style="width:20px;height:12px;background:#0a1624;border:1px solid var(--line)"></div>
+        <div style="width:20px;height:12px;background:#14532d"></div>
+        <div style="width:20px;height:12px;background:#22c55e"></div>
+        <div style="width:20px;height:12px;background:#f59e0b"></div>
+        <div style="width:20px;height:12px;background:#ef4444"></div>
+        <span>多</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== リピート率 ===== -->
+  <div class="section-pane" id="sec-repeat">
+    <div class="kpi-grid" id="repeatKpis"></div>
+    <div class="card">
+      <h2>新規 vs リピーター</h2>
+      <div id="repeatBars" style="display:flex;height:40px;border-radius:8px;overflow:hidden;margin-bottom:12px"></div>
+      <div id="repeatDetail" style="font-size:13px"></div>
+    </div>
+  </div>
+
+  <!-- ===== 目標設定 ===== -->
+  <div class="section-pane" id="sec-goals">
+    <div class="card">
+      <h2>キャスト月間目標</h2>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>キャスト</th><th>指名目標</th><th>達成</th><th>進捗</th><th>売上目標</th><th>達成</th><th>進捗</th><th>出勤目標</th><th>達成</th><th>操作</th></tr></thead>
+          <tbody id="goalsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -424,7 +635,7 @@ async function api(path){
 
 async function loadAll(){
   const s=$('storeId').value,y=$('year').value,m=$('month').value;
-  await Promise.all([loadCast(s,y,m),loadStore(s,y,m)]);
+  await Promise.all([loadCast(s,y,m),loadStore(s,y,m),loadHeatmap(s,y,m),loadRepeat(s,y,m),loadGoals(s,y,m)]);
 }
 
 async function loadCast(s,y,m){
@@ -545,6 +756,101 @@ async function loadStore(s,y,m){
     }).join('');
 
   }catch(e){console.error(e);alert('店舗分析エラー: '+e.message)}
+}
+
+// ヒートマップ
+async function loadHeatmap(s,y,m){
+  try{
+    const d=await api(`/management/heatmap?store_id=${s}&year=${y}&month=${m}`);
+    const hm=d.heatmap||[];
+    const dows=['月','火','水','木','金','土','日'];
+    // ヘッダー: 時間帯
+    const hours=[];for(let h=17;h<=27;h++) hours.push(h>=24?h-24:h); // 17時〜翌3時
+    $('heatmapHead').innerHTML='<tr><th></th>'+hours.map(h=>`<th style="font-size:11px">${h}時</th>`).join('')+'</tr>';
+    // 全体の最大値
+    let maxVal=1;
+    hm.forEach(row=>{ Object.values(row.hours).forEach(v=>{ if(v>maxVal) maxVal=v; }); });
+    // ボディ
+    $('heatmapBody').innerHTML=hm.map((row,i)=>{
+      const cells=hours.map(h=>{
+        const v=row.hours[h]||0;
+        const intensity=v/maxVal;
+        let bg='#0a1624';
+        if(intensity>0.8) bg='#ef4444';
+        else if(intensity>0.6) bg='#f59e0b';
+        else if(intensity>0.3) bg='#22c55e';
+        else if(intensity>0) bg='#14532d';
+        return `<td style="background:${bg};color:${intensity>0.5?'#fff':'var(--muted)'};font-size:12px;min-width:36px;padding:8px 4px">${v||''}</td>`;
+      }).join('');
+      return `<tr><td style="font-weight:700;font-size:13px;color:${i>=5?'var(--accent)':'var(--text)'}">${dows[i]}</td>${cells}</tr>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+
+// リピート率
+async function loadRepeat(s,y,m){
+  try{
+    const d=await api(`/management/repeat-analysis?store_id=${s}&year=${y}&month=${m}`);
+    $('repeatKpis').innerHTML=`
+      <div class="kpi"><div class="label">リピート率</div><div class="value" style="color:var(--green)">${pct(d.repeat_rate)}</div></div>
+      <div class="kpi"><div class="label">新規</div><div class="value">${d.new_count}</div><div class="sub">名</div></div>
+      <div class="kpi"><div class="label">リピーター</div><div class="value">${d.repeat_count}</div><div class="sub">名</div></div>
+      <div class="kpi"><div class="label">平均再来店</div><div class="value">${d.avg_revisit_days}</div><div class="sub">日</div></div>
+      <div class="kpi"><div class="label">新規 客単価</div><div class="value" style="font-size:18px">${yen(d.avg_new_spent)}</div></div>
+      <div class="kpi"><div class="label">リピーター 客単価</div><div class="value" style="font-size:18px">${yen(d.avg_repeat_spent)}</div></div>
+    `;
+    const total=d.new_count+d.repeat_count||1;
+    const newPct=d.new_count/total*100;
+    const repPct=d.repeat_count/total*100;
+    $('repeatBars').innerHTML=`
+      <div style="width:${newPct}%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">${d.new_count>0?'新規 '+d.new_count:''}</div>
+      <div style="width:${repPct}%;background:var(--green);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">${d.repeat_count>0?'リピ '+d.repeat_count:''}</div>
+    `;
+    $('repeatDetail').innerHTML=d.note?`<div style="color:var(--muted)">${d.note}</div>`:'';
+  }catch(e){console.error(e)}
+}
+
+// 目標設定
+let castPerfCache=[];
+async function loadGoals(s,y,m){
+  try{
+    const ym=`${y}-${String(m).padStart(2,'0')}`;
+    const [goals,perf]=await Promise.all([
+      api(`/management/goals?store_id=${s}&year_month=${ym}`),
+      api(`/management/cast-performance?store_id=${s}&year=${y}&month=${m}`)
+    ]);
+    castPerfCache=perf.casts||[];
+    const goalMap={};
+    goals.forEach(g=>goalMap[g.cast_id]=g);
+    const tb=$('goalsBody');tb.innerHTML='';
+    castPerfCache.forEach(c=>{
+      const g=goalMap[c.cast_id]||{target_nominations:0,target_sales:0,target_attendance:0};
+      const nomProg=g.target_nominations?Math.min(100,c.total_noms/g.target_nominations*100):0;
+      const saleProg=g.target_sales?Math.min(100,c.cast_revenue/g.target_sales*100):0;
+      const progBar=(pct)=>`<div style="width:100px;height:8px;background:#1e293b;border-radius:4px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${pct>=100?'var(--green)':pct>=70?'var(--gold)':'var(--accent)'};border-radius:4px"></div></div>`;
+      tb.innerHTML+=`<tr>
+        <td><b>${c.cast_name}</b></td>
+        <td><input type="number" value="${g.target_nominations}" style="width:60px" id="gn-${c.cast_id}"></td>
+        <td class="num">${c.total_noms}</td><td>${progBar(nomProg)}</td>
+        <td><input type="number" value="${g.target_sales}" style="width:90px" id="gs-${c.cast_id}"></td>
+        <td class="num">${yen(c.cast_revenue)}</td><td>${progBar(saleProg)}</td>
+        <td><input type="number" value="${g.target_attendance}" style="width:60px" id="ga-${c.cast_id}"></td>
+        <td class="num">${c.attendance_days}</td>
+        <td><button class="btn" style="font-size:11px;padding:4px 8px" onclick="saveGoal(${c.cast_id})">保存</button></td>
+      </tr>`;
+    });
+  }catch(e){console.error(e)}
+}
+
+async function saveGoal(castId){
+  const s=$('storeId').value,y=$('year').value,m=$('month').value;
+  const ym=`${y}-${String(m).padStart(2,'0')}`;
+  const body={store_id:parseInt(s),cast_id:castId,year_month:ym,
+    target_nominations:parseInt(document.getElementById('gn-'+castId).value)||0,
+    target_sales:parseFloat(document.getElementById('gs-'+castId).value)||0,
+    target_attendance:parseInt(document.getElementById('ga-'+castId).value)||0};
+  await fetch('/management/goals',{method:'POST',headers:{'Content-Type':'application/json','X-Role':'owner'},body:JSON.stringify(body)});
+  loadGoals(s,y,m);
 }
 
 loadAll();
