@@ -119,10 +119,10 @@ def save_weather_config(store_id: int, payload: WeatherConfigIn,
     try:
         cfg = db.query(WeatherConfig).filter_by(store_id=store_id).first()
         if cfg:
-            for k, v in payload.dict().items():
+            for k, v in (payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()).items():
                 setattr(cfg, k, v)
         else:
-            cfg = WeatherConfig(store_id=store_id, **payload.dict())
+            cfg = WeatherConfig(store_id=store_id, **(payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()))
             db.add(cfg)
         db.commit()
         return {"ok": True}

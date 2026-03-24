@@ -174,10 +174,10 @@ def save_pricing_config(store_id: int, payload: PricingConfigIn,
     try:
         cfg = db.query(PricingConfig).filter_by(store_id=store_id).first()
         if cfg:
-            for k, v in payload.dict().items():
+            for k, v in (payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()).items():
                 setattr(cfg, k, v)
         else:
-            cfg = PricingConfig(store_id=store_id, **payload.dict())
+            cfg = PricingConfig(store_id=store_id, **(payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()))
             db.add(cfg)
         db.commit()
         return {"ok": True}
@@ -190,7 +190,7 @@ def add_slot(store_id: int, payload: TimeSlotRuleIn,
     require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
-        rule = TimeSlotRule(store_id=store_id, **payload.dict())
+        rule = TimeSlotRule(store_id=store_id, **(payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()))
         db.add(rule); db.commit(); db.refresh(rule)
         return {"ok": True, "id": rule.id}
     finally:
@@ -205,7 +205,7 @@ def update_slot(store_id: int, rule_id: int, payload: TimeSlotRuleIn,
         rule = db.query(TimeSlotRule).filter_by(id=rule_id, store_id=store_id).first()
         if not rule:
             raise HTTPException(404, "Rule not found")
-        for k, v in payload.dict().items():
+        for k, v in (payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()).items():
             setattr(rule, k, v)
         db.commit()
         return {"ok": True}

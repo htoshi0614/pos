@@ -67,7 +67,9 @@ def compute_cast_salary(db, store_id: int, year: int, month: int) -> List[dict]:
     # Import models from pos (loaded after pos sets up models)
     try:
         from pos import Cast, Attendance, Nomination
-    except Exception:
+    except ImportError as e:
+        import logging
+        logging.warning(f"cast_salary: posモデルのインポートに失敗: {e}")
         return []
 
     casts = db.query(Cast).filter_by(store_id=store_id, is_active=True).all()
@@ -211,7 +213,9 @@ def list_salary_configs(store_id: int,
     try:
         try:
             from pos import Cast
-        except Exception:
+        except ImportError as e:
+            import logging
+            logging.warning(f"cast_salary: Castインポートに失敗: {e}")
             return []
         casts = db.query(Cast).filter_by(store_id=store_id, is_active=True).all()
         result = []
@@ -234,7 +238,7 @@ def save_salary_config(payload: CastSalaryConfigIn,
     db = SessionLocal()
     try:
         cfg = db.query(CastSalaryConfig).filter_by(cast_id=payload.cast_id).first()
-        data = payload.dict()
+        data = payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()
         if cfg:
             for k, v in data.items():
                 setattr(cfg, k, v)
@@ -290,7 +294,7 @@ def record_drink_back(store_id: int, payload: DrinkBackIn,
     require_role(x_role, ADMIN_ROLES)
     db = SessionLocal()
     try:
-        rec = DrinkBackRecord(store_id=store_id, **payload.dict())
+        rec = DrinkBackRecord(store_id=store_id, **(payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()))
         db.add(rec); db.commit()
         return {"ok": True}
     finally:

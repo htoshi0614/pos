@@ -100,11 +100,11 @@ def save_stripe_config(store_id: int, payload: StripeConfigIn,
     try:
         cfg = db.query(StripeConfig).filter_by(store_id=store_id).first()
         if cfg:
-            for k, v in payload.dict().items():
+            for k, v in (payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()).items():
                 if v:  # 空文字は既存値を保持
                     setattr(cfg, k, v)
         else:
-            cfg = StripeConfig(store_id=store_id, **payload.dict())
+            cfg = StripeConfig(store_id=store_id, **(payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()))
             db.add(cfg)
         db.commit()
         return {"ok": True}

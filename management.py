@@ -330,7 +330,7 @@ def set_goal(payload: CastGoalIn, x_role: Optional[str] = Header(None, alias="X-
             existing.target_sales = payload.target_sales
             existing.target_attendance = payload.target_attendance
         else:
-            g = CastGoal(**payload.dict())
+            g = CastGoal(**(payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()))
             db.add(g)
         db.commit()
         return {"ok": True}

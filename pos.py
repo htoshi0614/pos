@@ -793,7 +793,8 @@ def compute_bill(db, s: Session) -> Dict:
     booked_minutes = int(s.set_minutes or 60)
     sets      = 1
     remaining = max(0, total_minutes - booked_minutes)
-    extends   = (remaining + s.extend_unit - 1) // s.extend_unit if remaining > 0 else 0
+    eu = max(1, int(s.extend_unit or 30))
+    extends   = (remaining + eu - 1) // eu if remaining > 0 else 0
 
     set_amount    = sets * set_fee * s.guest_count
     extend_amount = extends * extend_fee * s.guest_count
@@ -887,7 +888,7 @@ def create_table(payload: TableIn, x_role: Optional[Role] = Header(None, alias="
     require_role(x_role, ["owner","manager"])
     db = SessionLocal()
     try:
-        t = Table(**payload.dict())
+        t = Table(**(payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()))
         db.add(t); db.commit(); db.refresh(t)
         return t
     finally:
@@ -916,7 +917,7 @@ def create_item(payload: ItemIn, x_role: Optional[Role] = Header(None, alias="X-
     require_role(x_role, ["owner","manager"])
     db=SessionLocal()
     try:
-        it=Item(**payload.dict()); db.add(it); db.commit(); db.refresh(it); return it
+        it=Item(**(payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict())); db.add(it); db.commit(); db.refresh(it); return it
     finally:
         db.close()
 
@@ -1096,6 +1097,82 @@ def unextend_session(session_id: int, x_role: Optional[Role] = Header(None, alia
     finally:
         db.close()
 
+
+class GuestCountIn(BaseModel):
+    guest_count: int
+
+@app.patch("/sessions/{session_id}/guest-count")
+def change_guest_count(session_id: int, payload: GuestCountIn, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """人数変更API"""
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    db = SessionLocal()
+    try:
+        s = db.get(Session, session_id)
+        if not s or s.status != "open":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found or closed")
+        check_closing_lock(db, s)
+        s.guest_count = max(1, payload.guest_count)
+        db.commit()
+        asyncio.get_event_loop().create_task(notify_clients("guest_count", {"session_id": session_id, "guest_count": s.guest_count}))
+        return {"ok": True, "guest_count": s.guest_count}
+    finally:
+        db.close()
+
+class MoveTableIn(BaseModel):
+    new_table_id: int
+
+@app.post("/sessions/{session_id}/move")
+def move_table(session_id: int, payload: MoveTableIn, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """席変更API：セッションを別テーブルに移動"""
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    db = SessionLocal()
+    try:
+        s = db.get(Session, session_id)
+        if not s or s.status != "open":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found or closed")
+        check_closing_lock(db, s)
+        new_table = db.get(Table, payload.new_table_id)
+        if not new_table:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Table not found")
+        # 移動先が使用中でないか確認
+        existing = db.query(Session).filter(Session.table_id == payload.new_table_id, Session.status == "open").first()
+        if existing:
+            raise HTTPException(status.HTTP_409_CONFLICT, f"{new_table.name} は使用中です")
+        old_table_id = s.table_id
+        s.table_id = payload.new_table_id
+        db.commit()
+        asyncio.get_event_loop().create_task(notify_clients("move_table", {"session_id": session_id, "old_table_id": old_table_id, "new_table_id": payload.new_table_id}))
+        return {"ok": True, "old_table_id": old_table_id, "new_table_id": payload.new_table_id, "new_table_name": new_table.name}
+    finally:
+        db.close()
+
+class StartTimeIn(BaseModel):
+    start_time: str  # HH:MM形式
+
+@app.patch("/sessions/{session_id}/start-time")
+def change_start_time(session_id: int, payload: StartTimeIn, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """スタート時間変更API"""
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    db = SessionLocal()
+    try:
+        s = db.get(Session, session_id)
+        if not s or s.status != "open":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found or closed")
+        check_closing_lock(db, s)
+        # HH:MM → 今日の日付でdatetimeを構築
+        hm = payload.start_time.split(":")
+        if len(hm) != 2:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "HH:MM形式で入力してください")
+        h, m = int(hm[0]), int(hm[1])
+        now = datetime.utcnow()
+        new_start = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        # 深夜帯(0-6時)で入力が昼の場合の補正は不要（そのまま使う）
+        s.start_time = new_start
+        db.commit()
+        asyncio.get_event_loop().create_task(notify_clients("start_time", {"session_id": session_id}))
+        return {"ok": True, "start_time": new_start.isoformat()}
+    finally:
+        db.close()
 
 @app.delete("/sessions/{session_id}")
 @app.post("/sessions/{session_id}/cancel") # UI側のフォールバックにも対応
@@ -1540,6 +1617,12 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
               <button class="bigbtn" id="btnAutoExtend" style="text-align:center;font-size:13px">自動延長 OFF</button>
               <button class="bigbtn" id="btnCancelCheckin" style="text-align:center;font-size:13px;color:#fca5a5;border-color:#7f1d1d">入店取消</button>
             </div>
+            <!-- 人数変更・席変更・スタート時間変更 -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
+              <button class="bigbtn" id="btnChangeGuest" style="text-align:center;font-size:12px" title="人数変更">人数変更</button>
+              <button class="bigbtn" id="btnMoveTable" style="text-align:center;font-size:12px" title="席移動">席変更</button>
+              <button class="bigbtn" id="btnChangeStart" style="text-align:center;font-size:12px" title="スタート時間変更">時間変更</button>
+            </div>
             <hr>
             <!-- 支払いエリア -->
             <div style="margin-bottom:8px">
@@ -1925,6 +2008,52 @@ async function checkout(){
   renderTimer(null); renderBill(null); await loadFloor(); refreshSales();
 }
 
+/* 人数変更 */
+async function changeGuestCount(){
+  if (!currentSessionId) return toast('テーブルを選択してください','err');
+  const current = currentBill?.guest_count || 1;
+  const input = prompt(`現在 ${current}名です。新しい人数を入力:`, current);
+  if (!input) return;
+  const n = parseInt(input, 10);
+  if (isNaN(n) || n < 1 || n > 99) return toast('正しい人数を入力してください','err');
+  await api(`/sessions/${currentSessionId}/guest-count`, {method:'PATCH', body:{guest_count: n}});
+  toast(`人数を ${n}名 に変更しました`); await refreshBill(); await loadFloor(); refreshSales();
+}
+
+/* 席変更 */
+async function moveTable(){
+  if (!currentSessionId) return toast('テーブルを選択してください','err');
+  const tables = floorModel.tables || [];
+  const freeT = tables.filter(t => !floorModel.sessionByTable[t.id]);
+  if (!freeT.length) return toast('空席がありません','err');
+  const list = freeT.map(t => `${t.id}: ${t.name}`).join('\\n');
+  const input = prompt('移動先の空席:\\n'+list+'\\n\\nテーブル番号(ID)を入力:', freeT[0].id);
+  if (!input) return;
+  const tid = parseInt(input, 10);
+  if (isNaN(tid)) return toast('正しいIDを入力してください','err');
+  try {
+    const r = await api(`/sessions/${currentSessionId}/move`, {method:'POST', body:{new_table_id: tid}});
+    selectedTableId = tid;
+    const tbl = tables.find(t=>t.id===tid);
+    if(tbl) $('selTable').textContent = tbl.name;
+    toast(`${r.new_table_name || tbl?.name} に移動しました`);
+    await refreshBill(); await loadFloor(); refreshSales();
+  } catch(e) { toast(e.message||'席変更に失敗しました','err'); }
+}
+
+/* スタート時間変更 */
+async function changeStartTime(){
+  if (!currentSessionId) return toast('テーブルを選択してください','err');
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2,'0');
+  const mm = String(now.getMinutes()).padStart(2,'0');
+  const input = prompt(`新しいスタート時間を HH:MM 形式で入力:`, `${hh}:${mm}`);
+  if (!input) return;
+  if (!/^\\d{1,2}:\\d{2}$/.test(input)) return toast('HH:MM形式で入力してください','err');
+  await api(`/sessions/${currentSessionId}/start-time`, {method:'PATCH', body:{start_time: input}});
+  toast(`スタート時間を ${input} に変更しました`); await refreshBill(); await loadFloor(); refreshSales();
+}
+
 /* 明細＆サイドタイマー */
 async function refreshBill(){
   if (!currentSessionId) return;
@@ -2023,7 +2152,7 @@ function connectWS(){
       try{
         const msg=JSON.parse(ev.data);
         // 他端末からの変更通知 → 売上&フロアを即時更新
-        if(['order','cancel_order','payment','checkout','cancel_session','extend','checkin'].includes(msg.event)){
+        if(['order','cancel_order','payment','checkout','cancel_session','extend','checkin','guest_count','move_table','start_time'].includes(msg.event)){
           refreshSales();
           loadFloor();
           if(currentSessionId) refreshBill();
@@ -2069,6 +2198,11 @@ async function initUI(){
     cancelCheckin().catch(e=>toast(e.message,'err'));
   });
 
+  // 人数変更・席変更・スタート時間変更
+  $('btnChangeGuest').addEventListener('click', ()=>changeGuestCount().catch(e=>toast(e.message,'err')));
+  $('btnMoveTable').addEventListener('click', ()=>moveTable().catch(e=>toast(e.message,'err')));
+  $('btnChangeStart').addEventListener('click', ()=>changeStartTime().catch(e=>toast(e.message,'err')));
+
   // 支払い（3方法）
   $('btnPayCash').addEventListener('click', ()=>payMethod('cash').catch(e=>toast(e.message,'err')));
   $('btnPayCard').addEventListener('click', ()=>payMethod('card').catch(e=>toast(e.message,'err')));
@@ -2093,6 +2227,7 @@ async function initUI(){
         `<tr><td>${o.name}</td><td style="text-align:right">¥${Math.round(o.amount).toLocaleString()}</td></tr>`
       ).join('');
       const w = window.open('','_blank','width=400,height=600');
+      if(!w){ toast('ポップアップがブロックされています。許可してください。','err'); return; }
       w.document.write(`<!doctype html><html><head><meta charset="utf-8">
         <title>領収書</title>
         <style>body{font-family:sans-serif;font-size:13px;padding:20px;color:#111}
@@ -2228,13 +2363,14 @@ a{color:var(--accent)}
 async function load(){
   const r=await fetch('/audit-logs?limit=200',{headers:{'X-Role':'owner'}});
   const data=await r.json();
+  function esc(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
   document.getElementById('list').innerHTML=data.map(l=>`<tr>
-    <td style="white-space:nowrap;font-size:11px">${l.ts}</td>
-    <td>${l.role||'-'}</td>
-    <td><span class="method ${l.method}">${l.method}</span></td>
-    <td style="font-family:monospace;font-size:11px">${l.path}</td>
-    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--muted)">${l.payload||''}</td>
-    <td style="font-size:11px">${l.ip||''}</td>
+    <td style="white-space:nowrap;font-size:11px">${esc(l.ts)}</td>
+    <td>${esc(l.role||'-')}</td>
+    <td><span class="method ${esc(l.method)}">${esc(l.method)}</span></td>
+    <td style="font-family:monospace;font-size:11px">${esc(l.path)}</td>
+    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--muted)">${esc(l.payload||'')}</td>
+    <td style="font-size:11px">${esc(l.ip||'')}</td>
   </tr>`).join('');
 }
 load(); setInterval(load,10000);
