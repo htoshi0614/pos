@@ -781,6 +781,25 @@ try:
 except Exception:
     pass
 
+# --- drink_back_records.back_type / cast_salary_configs.bottle_back_rate マイグレーション ---
+try:
+    with engine.connect() as conn:
+        from sqlalchemy import text, inspect as sa_inspect
+        # back_type カラム
+        cols_db = [c["name"] for c in sa_inspect(engine).get_columns("drink_back_records")]
+        if "back_type" not in cols_db:
+            conn.execute(text("ALTER TABLE drink_back_records ADD COLUMN back_type VARCHAR DEFAULT 'drink'"))
+            conn.commit()
+            print("[migrate] drink_back_records.back_type added")
+        # bottle_back_rate カラム
+        cols_cfg = [c["name"] for c in sa_inspect(engine).get_columns("cast_salary_configs")]
+        if "bottle_back_rate" not in cols_cfg:
+            conn.execute(text("ALTER TABLE cast_salary_configs ADD COLUMN bottle_back_rate FLOAT DEFAULT 0.0"))
+            conn.commit()
+            print("[migrate] cast_salary_configs.bottle_back_rate added")
+except Exception:
+    pass
+
 # ---------- 会計計算 ----------
 def compute_bill(db, s: Session) -> Dict:
     # 料金ルールエンジンから設定を取得
@@ -1016,17 +1035,23 @@ def add_order(session_id: int, payload: OrderIn, x_role: Optional[Role] = Header
         db.add(o); db.commit(); db.refresh(o)
         _safe_notify("order", {"session_id": session_id})
 
-        # ドリンクバック自動記録（キャスト指定 + ドリンクカテゴリの場合）
-        if payload.cast_id and item.category == "drink":
+        # ドリンクバック／ボトルバック自動記録（キャスト指定の場合）
+        if payload.cast_id and item.category in ("drink", "bottle"):
             try:
                 from cast_salary import CastSalaryConfig, DrinkBackRecord
                 cfg = db.query(CastSalaryConfig).filter_by(cast_id=payload.cast_id).first()
-                rate = cfg.drink_back_rate if cfg else 0
+                if item.category == "drink":
+                    rate = cfg.drink_back_rate if cfg else 0
+                    back_type = "drink"
+                else:  # bottle
+                    rate = cfg.bottle_back_rate if cfg else 0
+                    back_type = "bottle"
                 if rate > 0:
-                    back_amount = item.price * payload.qty * rate
+                    back_amount = item.price * payload.qty * rate  # サービス料抜き小計
                     rec = DrinkBackRecord(
                         store_id=s.store_id, cast_id=payload.cast_id,
-                        session_id=session_id, order_id=o.id, amount=back_amount)
+                        session_id=session_id, order_id=o.id,
+                        back_type=back_type, amount=back_amount)
                     db.add(rec); db.commit()
             except Exception:
                 pass  # モジュール未読み込みなら無視
@@ -1172,9 +1197,11 @@ def change_start_time(session_id: int, payload: StartTimeIn, x_role: Optional[Ro
         if len(hm) != 2:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "HH:MM形式で入力してください")
         h, m = int(hm[0]), int(hm[1])
-        now = datetime.utcnow()
-        new_start = now.replace(hour=h, minute=m, second=0, microsecond=0)
-        # 深夜帯(0-6時)で入力が昼の場合の補正は不要（そのまま使う）
+        # JSTで入力された時刻をUTCに変換
+        jst = timezone(timedelta(hours=9))
+        now_jst = datetime.now(jst)
+        new_start_jst = now_jst.replace(hour=h, minute=m, second=0, microsecond=0)
+        new_start = new_start_jst.astimezone(timezone.utc).replace(tzinfo=None)
         s.start_time = new_start
         db.commit()
         _safe_notify("start_time", {"session_id": session_id})
@@ -1842,7 +1869,11 @@ async function loadFloor(){
   });
 
   if(!selectedTableId && tables.length){
-    selectedTableId=tables[0].id; $('selTable').textContent=tables[0].name; $('table-'+selectedTableId)?.classList.add('sel');
+    selectedTableId=tables[0].id; $('selTable').textContent=tables[0].name;
+  }
+  if(selectedTableId){
+    const selEl=$('table-'+selectedTableId);
+    if(selEl) selEl.classList.add('sel');
   }
 }
 

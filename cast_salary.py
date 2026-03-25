@@ -24,6 +24,7 @@ class CastSalaryConfig(Base):
     hourly_rate          = Column(Float, default=0.0)   # 時給
     floor_rate           = Column(Float, default=0.0)   # 場内率 (e.g. 0.10 = 10%)
     drink_back_rate      = Column(Float, default=0.0)   # ドリンクバック率
+    bottle_back_rate     = Column(Float, default=0.0)   # ボトルバック率（サービス料抜き小計に対する率）
     nom_fee_hon          = Column(Float, default=0.0)   # 本指名料
     nom_fee_jyonai       = Column(Float, default=0.0)   # 場内指名料
     nom_fee_dohan        = Column(Float, default=0.0)   # 同伴料
@@ -36,6 +37,7 @@ class DrinkBackRecord(Base):
     cast_id    = Column(Integer, ForeignKey("casts.id"))
     session_id = Column(Integer, ForeignKey("sessions.id"))
     order_id   = Column(Integer, ForeignKey("orders.id"))
+    back_type  = Column(String, default="drink")  # "drink" or "bottle"
     amount     = Column(Float, default=0.0)   # 実際のバック金額
     created_at = Column(DateTime, default=datetime.utcnow)
     cast       = relationship("Cast")
@@ -48,6 +50,7 @@ class CastSalaryConfigIn(BaseModel):
     hourly_rate: float = 0.0
     floor_rate: float = 0.0
     drink_back_rate: float = 0.0
+    bottle_back_rate: float = 0.0
     nom_fee_hon: float = 0.0
     nom_fee_jyonai: float = 0.0
     nom_fee_dohan: float = 0.0
@@ -100,15 +103,19 @@ def compute_cast_salary(db, store_id: int, year: int, month: int) -> List[dict]:
         # 時給
         time_pay = hours_worked * hourly_rate
 
-        # ドリンクバック
-        drink_backs = (db.query(DrinkBackRecord)
-                       .filter_by(store_id=store_id, cast_id=cast.id)
-                       .all())
-        drink_back_total = sum(
-            r.amount for r in drink_backs
-            if r.created_at.replace(tzinfo=timezone.utc).astimezone(JST).year == year
-            and r.created_at.replace(tzinfo=timezone.utc).astimezone(JST).month == month
-        )
+        # ドリンクバック＆ボトルバック
+        all_backs = (db.query(DrinkBackRecord)
+                     .filter_by(store_id=store_id, cast_id=cast.id)
+                     .all())
+        drink_back_total = 0.0
+        bottle_back_total = 0.0
+        for r in all_backs:
+            rj = r.created_at.replace(tzinfo=timezone.utc).astimezone(JST)
+            if rj.year == year and rj.month == month:
+                if getattr(r, 'back_type', 'drink') == 'bottle':
+                    bottle_back_total += r.amount
+                else:
+                    drink_back_total += r.amount
 
         # 指名料
         noms = (db.query(Nomination).filter_by(store_id=store_id, cast_id=cast.id).all())
@@ -128,7 +135,7 @@ def compute_cast_salary(db, store_id: int, year: int, month: int) -> List[dict]:
         # (簡易実装: session nomination fee × floor_rate)
         floor_pay = nom_pay * floor_rate
 
-        total = time_pay + drink_back_total + nom_pay + floor_pay
+        total = time_pay + drink_back_total + bottle_back_total + nom_pay + floor_pay
 
         results.append({
             "cast_id":       cast.id,
@@ -138,6 +145,7 @@ def compute_cast_salary(db, store_id: int, year: int, month: int) -> List[dict]:
             "hourly_rate":   hourly_rate,
             "time_pay":      round(time_pay),
             "drink_back":    round(drink_back_total),
+            "bottle_back":   round(bottle_back_total),
             "nom_hon":       nom_count["hon"],
             "nom_jyonai":    nom_count["jyonai"],
             "nom_dohan":     nom_count["dohan"],
@@ -161,7 +169,7 @@ def export_salary_excel(data: List[dict], year: int, month: int) -> bytes:
 
     # ヘッダー
     headers = ["名前", "ランク", "勤務時間(h)", "時給", "時給分",
-               "ドリンクバック", "本指名", "場内指名", "同伴",
+               "ドリンクバック", "ボトルバック", "本指名", "場内指名", "同伴",
                "指名料計", "場内料", "合計"]
     header_fill = PatternFill("solid", fgColor="1E3A5F")
     bold = Font(bold=True, color="FFFFFF")
@@ -173,7 +181,7 @@ def export_salary_excel(data: List[dict], year: int, month: int) -> bytes:
 
     for row, d in enumerate(data, 2):
         vals = [d["cast_name"], d["rank"], d["hours_worked"], d["hourly_rate"],
-                d["time_pay"], d["drink_back"], d["nom_hon"], d["nom_jyonai"],
+                d["time_pay"], d["drink_back"], d["bottle_back"], d["nom_hon"], d["nom_jyonai"],
                 d["nom_dohan"], d["nom_pay"], d["floor_pay"], d["total"]]
         for col, v in enumerate(vals, 1):
             ws.cell(row=row, column=col, value=v)
@@ -181,14 +189,14 @@ def export_salary_excel(data: List[dict], year: int, month: int) -> bytes:
     # 通貨フォーマット（¥表示）
     yen_fmt = '#,##0"円"'
     for row_idx in range(2, len(data) + 2):
-        for col_idx in [5, 6, 10, 11, 12]:  # 時給分, DB, 指名料, 場内料, 合計
+        for col_idx in [5, 6, 7, 11, 12, 13]:  # 時給分, DB, BB, 指名料, 場内料, 合計
             ws.cell(row=row_idx, column=col_idx).number_format = yen_fmt
         ws.cell(row=row_idx, column=4).number_format = yen_fmt  # 時給
 
     # 合計行
     last = len(data) + 2
     ws.cell(row=last, column=1, value="合計").font = Font(bold=True)
-    for col_idx, key in [(5,"time_pay"),(6,"drink_back"),(10,"nom_pay"),(11,"floor_pay"),(12,"total")]:
+    for col_idx, key in [(5,"time_pay"),(6,"drink_back"),(7,"bottle_back"),(11,"nom_pay"),(12,"floor_pay"),(13,"total")]:
         total_val = sum(d[key] for d in data)
         cell = ws.cell(row=last, column=col_idx, value=total_val)
         cell.font = Font(bold=True)
@@ -365,7 +373,7 @@ td.num{text-align:right;font-family:monospace}
     <table>
       <thead><tr>
         <th>名前</th><th>ランク</th><th>勤務時間</th><th>時給分</th>
-        <th>ドリンクバック</th><th>本指名</th><th>場内指名</th><th>同伴</th>
+        <th>ドリンクバック</th><th>ボトルバック</th><th>本指名</th><th>場内指名</th><th>同伴</th>
         <th>指名料</th><th>場内料</th><th style="text-align:right">合計</th>
       </tr></thead>
       <tbody id="reportBody"></tbody>
@@ -378,7 +386,7 @@ td.num{text-align:right;font-family:monospace}
     <h2>給与設定（キャスト別）</h2>
     <table>
       <thead><tr>
-        <th>名前</th><th>時給</th><th>場内率</th><th>ドリンクバック率</th>
+        <th>名前</th><th>時給</th><th>場内率</th><th>ドリンクバック率</th><th>ボトルバック率</th>
         <th>本指名</th><th>場内指名</th><th>同伴</th><th></th>
       </tr></thead>
       <tbody id="configBody"></tbody>
@@ -408,24 +416,26 @@ async function loadReport(){
     $('reportTitle').textContent=`${y}年${m}月 給与レポート`;
     const tb=$('reportBody');
     tb.innerHTML='';
-    let totTime=0,totDB=0,totNom=0,totFloor=0,totAll=0;
+    let totTime=0,totDB=0,totBB=0,totNom=0,totFloor=0,totAll=0;
     (d.casts||[]).forEach(c=>{
       const tr=document.createElement('tr');
       tr.innerHTML=`<td>${c.cast_name}</td><td>${c.rank||''}</td>
         <td class="num">${c.hours_worked}h</td><td class="num">¥${(c.time_pay||0).toLocaleString()}</td>
         <td class="num">¥${(c.drink_back||0).toLocaleString()}</td>
+        <td class="num">¥${(c.bottle_back||0).toLocaleString()}</td>
         <td class="num">${c.nom_hon}</td><td class="num">${c.nom_jyonai}</td><td class="num">${c.nom_dohan}</td>
         <td class="num">¥${(c.nom_pay||0).toLocaleString()}</td>
         <td class="num">¥${(c.floor_pay||0).toLocaleString()}</td>
         <td class="num"><b>¥${(c.total||0).toLocaleString()}</b></td>`;
       tb.appendChild(tr);
-      totTime+=c.time_pay||0; totDB+=c.drink_back||0;
+      totTime+=c.time_pay||0; totDB+=c.drink_back||0; totBB+=c.bottle_back||0;
       totNom+=c.nom_pay||0; totFloor+=c.floor_pay||0; totAll+=c.total||0;
     });
     $('reportFoot').innerHTML=`<tr style="border-top:2px solid var(--accent)">
       <td colspan="3"><b>合計</b></td>
       <td class="num">¥${totTime.toLocaleString()}</td>
       <td class="num">¥${totDB.toLocaleString()}</td>
+      <td class="num">¥${totBB.toLocaleString()}</td>
       <td colspan="3"></td>
       <td class="num">¥${totNom.toLocaleString()}</td>
       <td class="num">¥${totFloor.toLocaleString()}</td>
@@ -451,6 +461,7 @@ async function loadConfigs(){
         <td class="num">¥${(c.hourly_rate||0).toLocaleString()}</td>
         <td class="num">${((c.floor_rate||0)*100).toFixed(0)}%</td>
         <td class="num">${((c.drink_back_rate||0)*100).toFixed(0)}%</td>
+        <td class="num">${((c.bottle_back_rate||0)*100).toFixed(0)}%</td>
         <td class="num">¥${(c.nom_fee_hon||0).toLocaleString()}</td>
         <td class="num">¥${(c.nom_fee_jyonai||0).toLocaleString()}</td>
         <td class="num">¥${(c.nom_fee_dohan||0).toLocaleString()}</td>
@@ -470,6 +481,7 @@ function openEdit(castId, cfg){
     <label>時給 <input id="e_hr" type="number" value="${cfg.hourly_rate||0}"></label>
     <label>場内率（0.1=10%）<input id="e_fr" type="number" step="0.01" value="${cfg.floor_rate||0}"></label>
     <label>ドリンクバック率 <input id="e_db" type="number" step="0.01" value="${cfg.drink_back_rate||0}"></label>
+    <label>ボトルバック率 <input id="e_bb" type="number" step="0.01" value="${cfg.bottle_back_rate||0}"></label>
     <label>本指名料 <input id="e_nh" type="number" value="${cfg.nom_fee_hon||0}"></label>
     <label>場内指名料 <input id="e_nj" type="number" value="${cfg.nom_fee_jyonai||0}"></label>
     <label>同伴料 <input id="e_nd" type="number" value="${cfg.nom_fee_dohan||0}"></label>
@@ -488,6 +500,7 @@ async function saveConfig(castId, storeId){
       hourly_rate:parseFloat($('e_hr').value||0),
       floor_rate:parseFloat($('e_fr').value||0),
       drink_back_rate:parseFloat($('e_db').value||0),
+      bottle_back_rate:parseFloat($('e_bb').value||0),
       nom_fee_hon:parseFloat($('e_nh').value||0),
       nom_fee_jyonai:parseFloat($('e_nj').value||0),
       nom_fee_dohan:parseFloat($('e_nd').value||0),

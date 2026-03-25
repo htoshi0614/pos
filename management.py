@@ -110,15 +110,19 @@ def compute_cast_performance(db, store_id: int, year: int, month: int) -> List[d
         hourly_rate = cfg.hourly_rate if cfg else 0
         time_pay = hours_worked * hourly_rate
 
-        # ドリンクバック
-        drink_backs = db.query(DrinkBackRecord).filter_by(
+        # ドリンクバック＆ボトルバック
+        all_backs = db.query(DrinkBackRecord).filter_by(
             store_id=store_id, cast_id=cast.id
         ).all()
-        drink_back_total = sum(
-            r.amount for r in drink_backs
-            if r.created_at.replace(tzinfo=timezone.utc).astimezone(JST).year == year
-            and r.created_at.replace(tzinfo=timezone.utc).astimezone(JST).month == month
-        )
+        drink_back_total = 0.0
+        bottle_back_total = 0.0
+        for r in all_backs:
+            rj = r.created_at.replace(tzinfo=timezone.utc).astimezone(JST)
+            if rj.year == year and rj.month == month:
+                if getattr(r, 'back_type', 'drink') == 'bottle':
+                    bottle_back_total += r.amount
+                else:
+                    drink_back_total += r.amount
 
         # 指名料
         nom_fee_hon = cfg.nom_fee_hon if cfg else 0
@@ -126,7 +130,7 @@ def compute_cast_performance(db, store_id: int, year: int, month: int) -> List[d
         nom_fee_dohan = cfg.nom_fee_dohan if cfg else 0
         nom_pay = hon_count * nom_fee_hon + jyonai_count * nom_fee_jyonai + dohan_count * nom_fee_dohan
 
-        total_pay = time_pay + drink_back_total + nom_pay
+        total_pay = time_pay + drink_back_total + bottle_back_total + nom_pay
 
         # 給率 = 総支給 / 関与売上
         pay_rate = (total_pay / cast_revenue * 100) if cast_revenue > 0 else 0
@@ -152,6 +156,7 @@ def compute_cast_performance(db, store_id: int, year: int, month: int) -> List[d
             # 金額
             "time_pay": round(time_pay),
             "drink_back": round(drink_back_total),
+            "bottle_back": round(bottle_back_total),
             "nom_pay": round(nom_pay),
             "total_pay": round(total_pay),
             # 売上
@@ -516,7 +521,7 @@ td.rank-3{color:#cd7f32;font-weight:700}
           <th>出勤日</th><th>勤務h</th>
           <th>本指名</th><th>場内</th><th>同伴</th><th>指名計</th>
           <th>本指名率</th><th>場内率</th><th>同伴率</th>
-          <th>時給分</th><th>ドリンクバック</th><th>指名料</th><th>総支給</th>
+          <th>時給分</th><th>ドリンクバック</th><th>ボトルバック</th><th>指名料</th><th>総支給</th>
           <th>売上貢献</th><th>給率</th><th>売上シェア</th>
         </tr></thead>
         <tbody id="castBody"></tbody>
@@ -668,7 +673,7 @@ async function loadCast(s,y,m){
         <td class="num" style="color:${c.hon_rate>20?'var(--green)':'inherit'}">${pct(c.hon_rate)}</td>
         <td class="num">${pct(c.jyonai_rate)}</td>
         <td class="num">${pct(c.dohan_rate)}</td>
-        <td class="num">${yen(c.time_pay)}</td><td class="num">${yen(c.drink_back)}</td>
+        <td class="num">${yen(c.time_pay)}</td><td class="num">${yen(c.drink_back)}</td><td class="num">${yen(c.bottle_back||0)}</td>
         <td class="num">${yen(c.nom_pay)}</td><td class="num"><b>${yen(c.total_pay)}</b></td>
         <td class="num">${yen(c.cast_revenue)}</td>
         <td class="num" style="color:${c.pay_rate>50?'var(--red)':c.pay_rate>35?'var(--gold)':'var(--green)'}"><b>${pct(c.pay_rate)}</b></td>

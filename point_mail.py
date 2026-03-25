@@ -348,6 +348,7 @@ def ui_mail():
 :root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--accent:#0ea5e9;--green:#22c55e;--err:#ef4444}
 *{box-sizing:border-box;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
 body{margin:0;background:var(--bg);color:var(--text);padding:20px}
+.container{max-width:640px;margin:0 auto}
 h1{font-size:20px;margin-bottom:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}
 .card h2{margin:0 0 14px;font-size:15px;border-bottom:1px solid var(--line);padding-bottom:10px}
@@ -358,7 +359,6 @@ input,select{font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid 
 .btn.green{background:#14532d;border-color:var(--green);color:#4ade80}
 .btn.danger{background:#7f1d1d;border-color:var(--err);color:#fca5a5;font-size:12px;padding:4px 10px}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left}
 th{background:#111827;font-size:12px;color:var(--muted)}
@@ -366,65 +366,151 @@ th{background:#111827;font-size:12px;color:var(--muted)}
 .badge.sent{background:#14532d;color:#4ade80}
 .badge.failed{background:#7f1d1d;color:#fca5a5}
 a{color:var(--accent)}
-.note{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.6}
+.note{font-size:12px;color:var(--muted);line-height:1.6}
+.preset-btn{cursor:pointer;font-size:13px;padding:10px 16px;border-radius:10px;border:2px solid var(--line);background:#111827;color:var(--text);text-align:center;transition:all .15s}
+.preset-btn:hover{border-color:var(--accent);background:#0c1a2e}
+.preset-btn.active{border-color:var(--accent);background:#0c1a2e}
+.preset-btn .icon{font-size:24px;display:block;margin-bottom:4px}
+.step{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.step-num{width:28px;height:28px;border-radius:50%;background:var(--accent);color:#001018;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.step-label{font-size:14px;font-weight:600}
+.status-bar{display:flex;gap:12px;padding:12px 16px;border-radius:10px;font-size:13px;margin-bottom:16px}
+.status-bar.ok{background:#14532d33;border:1px solid #22c55e44;color:#4ade80}
+.status-bar.ng{background:#7f1d1d33;border:1px solid #ef444444;color:#fca5a5}
+.advanced-toggle{cursor:pointer;font-size:12px;color:var(--muted);background:none;border:none;text-decoration:underline;padding:0;margin-top:8px}
+.advanced-toggle:hover{color:var(--text)}
+.hidden{display:none}
+.recipient-item{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:#0a1423}
+.recipient-item .email{flex:1;font-size:14px}
+.recipient-item .name{font-size:12px;color:var(--muted)}
 </style></head><body>
+<div class="container">
 <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
-  <h1>📧 ポイントメール設定</h1>
-  <a href="/ui" style="font-size:13px;margin-left:auto">← POS に戻る</a>
+  <h1>ポイントメール設定</h1>
+  <a href="/ui" style="font-size:13px;margin-left:auto">POS に戻る</a>
 </div>
 
+<!-- ステータス -->
+<div class="status-bar ng" id="statusBar">設定が必要です</div>
+
+<!-- STEP 1: メールサービス選択 -->
 <div class="card">
-  <h2>SMTP設定（メール送信サーバー）</h2>
-  <div class="note" style="margin-top:0;margin-bottom:12px">
-    Gmailの場合: smtp.gmail.com / ポート587 / アプリパスワードを使用してください
+  <div class="step"><div class="step-num">1</div><div class="step-label">メールサービスを選択</div></div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+    <button class="preset-btn" onclick="selectPreset('gmail')" id="pre_gmail">
+      <span class="icon">G</span>Gmail
+    </button>
+    <button class="preset-btn" onclick="selectPreset('yahoo')" id="pre_yahoo">
+      <span class="icon">Y!</span>Yahoo
+    </button>
+    <button class="preset-btn" onclick="selectPreset('outlook')" id="pre_outlook">
+      <span class="icon">O</span>Outlook
+    </button>
   </div>
-  <div class="grid2">
-    <label>SMTPホスト<input id="smtpHost" value="smtp.gmail.com"></label>
-    <label>ポート<input id="smtpPort" type="number" value="587"></label>
-    <label>ユーザー（メールアドレス）<input id="smtpUser" placeholder="your@gmail.com"></label>
-    <label>パスワード<input id="smtpPass" type="password" placeholder="アプリパスワード"></label>
+  <div style="margin-top:12px">
+    <label>送信に使うメールアドレス<input id="smtpUser" placeholder="your@gmail.com"></label>
+    <label id="passLabel">アプリパスワード（Gmailの通常パスワードではありません）<input id="smtpPass" type="password" placeholder="16桁の英字（例: abcd efgh ijkl mnop）"></label>
+    <div class="note" id="presetNote" style="line-height:1.8"></div>
+    <div id="helpBox" style="margin-top:8px;padding:12px;background:#0a1423;border:1px solid var(--line);border-radius:10px;font-size:12px;line-height:1.8;color:var(--muted)"></div>
+  </div>
+  <button class="advanced-toggle" onclick="toggleAdvanced()">詳細設定を表示</button>
+  <div class="hidden" id="advancedSection" style="margin-top:12px">
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+      <label>SMTPホスト<input id="smtpHost" value="smtp.gmail.com"></label>
+      <label>ポート<input id="smtpPort" type="number" value="587"></label>
+    </div>
     <label>送信者名<input id="fromName" value="POS Start"></label>
-    <label>送信元メール（空欄でユーザーと同じ）<input id="fromEmail" placeholder=""></label>
+    <label>送信元メール（空欄=ログインと同じ）<input id="fromEmail" placeholder=""></label>
   </div>
-  <div class="row" style="margin-top:12px;justify-content:flex-end">
-    <button class="btn solid" onclick="saveConfig()">設定保存</button>
+  <div style="margin-top:14px;text-align:right">
+    <button class="btn solid" onclick="saveConfig()">保存</button>
   </div>
 </div>
 
+<!-- STEP 2: 送信先 -->
 <div class="card">
-  <h2>送信先メールアドレス</h2>
-  <div class="note" style="margin-top:0;margin-bottom:12px">
-    本締め完了時に、ここに登録されたアドレス全てにデイリーレポートが自動送信されます。
-  </div>
+  <div class="step"><div class="step-num">2</div><div class="step-label">送信先を追加</div></div>
+  <div class="note" style="margin-bottom:12px">本締め完了時に自動送信されます</div>
   <div class="row" style="margin-bottom:12px">
-    <input id="newName" placeholder="名前（任意）" style="width:140px">
     <input id="newEmail" placeholder="メールアドレス" style="flex:1">
+    <input id="newName" placeholder="名前（任意）" style="width:120px">
     <button class="btn solid" onclick="addRecipient()">追加</button>
   </div>
-  <table>
-    <thead><tr><th>名前</th><th>メールアドレス</th><th>操作</th></tr></thead>
-    <tbody id="recipientList"></tbody>
-  </table>
+  <div id="recipientList"></div>
 </div>
 
+<!-- STEP 3: テスト -->
 <div class="card">
-  <h2>テスト送信</h2>
-  <div class="note" style="margin-top:0;margin-bottom:12px">
-    設定と送信先が正しいか確認するために、ダミーデータでテストメールを送信します。
+  <div class="step"><div class="step-num">3</div><div class="step-label">テスト送信で確認</div></div>
+  <div class="note" style="margin-bottom:12px">ダミーデータでテストメールを送ります</div>
+  <button class="btn green" onclick="testSend()" style="width:100%;padding:12px">テストメールを送信</button>
+</div>
+
+<!-- 送信履歴（折りたたみ） -->
+<div class="card">
+  <button class="advanced-toggle" onclick="toggleLogs()" style="font-size:14px;font-weight:600;color:var(--text);text-decoration:none">送信履歴 ▼</button>
+  <div class="hidden" id="logSection" style="margin-top:12px">
+    <table>
+      <thead><tr><th>営業日</th><th>送信先</th><th>状態</th><th>日時</th></tr></thead>
+      <tbody id="logList"></tbody>
+    </table>
   </div>
-  <button class="btn green" onclick="testSend()">テストメールを送信</button>
 </div>
-
-<div class="card">
-  <h2>送信履歴</h2>
-  <table>
-    <thead><tr><th>営業日</th><th>送信先</th><th>状態</th><th>送信日時</th></tr></thead>
-    <tbody id="logList"></tbody>
-  </table>
 </div>
 
 <script>
 const storeId=1, H={'Content-Type':'application/json','X-Role':'owner'};
+const PRESETS={
+  gmail:{
+    host:'smtp.gmail.com',port:587,
+    placeholder:'your@gmail.com',
+    passLabel:'Gmailアプリパスワード（通常のGoogleパスワードでは送れません）',
+    passPlaceholder:'16桁の英字（例: abcd efgh ijkl mnop）',
+    note:'Gmailで送信するには「アプリパスワード」が必要です。',
+    help:'<b>取得手順（1分）:</b><br>1. <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color:#0ea5e9">Google アプリパスワード設定</a> を開く<br>2. Googleにログイン（2段階認証が必要）<br>3. アプリ名に「POS」と入力して「作成」をクリック<br>4. 表示された16桁のパスワードをコピーして上に貼り付け'
+  },
+  yahoo:{
+    host:'smtp.mail.yahoo.co.jp',port:465,
+    placeholder:'your@yahoo.co.jp',
+    passLabel:'Yahoo!メールパスワード',
+    passPlaceholder:'Yahoo!メールのパスワード',
+    note:'Yahoo!メールのSMTP送信を有効にする必要があります。',
+    help:'<b>設定手順:</b><br>1. <a href="https://mail.yahoo.co.jp/" target="_blank" style="color:#0ea5e9">Yahoo!メール</a> にログイン<br>2. 設定 > IMAP/POP/SMTPアクセス を開く<br>3.「Yahoo! JAPAN公式サービス以外からのアクセスも有効にする」をON<br>4. Yahoo!メールのパスワードを上に入力'
+  },
+  outlook:{
+    host:'smtp.office365.com',port:587,
+    placeholder:'your@outlook.com',
+    passLabel:'Outlookパスワード',
+    passPlaceholder:'Outlookアカウントのパスワード',
+    note:'Outlookアカウントのパスワードで送信できます。',
+    help:'<b>設定手順:</b><br>1. Outlookのメールアドレスを上に入力<br>2. Outlookアカウントのパスワードを入力<br>※ 2段階認証を有効にしている場合はアプリパスワードが必要です'
+  }
+};
+let currentPreset='gmail';
+
+function selectPreset(key){
+  currentPreset=key;
+  const p=PRESETS[key];
+  document.getElementById('smtpHost').value=p.host;
+  document.getElementById('smtpPort').value=p.port;
+  document.getElementById('smtpUser').placeholder=p.placeholder;
+  document.getElementById('passLabel').childNodes[0].textContent=p.passLabel;
+  document.getElementById('smtpPass').placeholder=p.passPlaceholder;
+  document.getElementById('presetNote').textContent=p.note;
+  document.getElementById('helpBox').innerHTML=p.help;
+  document.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('pre_'+key).classList.add('active');
+}
+
+function toggleAdvanced(){
+  const s=document.getElementById('advancedSection');
+  s.classList.toggle('hidden');
+}
+function toggleLogs(){
+  const s=document.getElementById('logSection');
+  s.classList.toggle('hidden');
+  if(!s.classList.contains('hidden')) loadLogs();
+}
 
 async function api(path,opt={}){
   const o={method:'GET',headers:H,...opt};
@@ -435,14 +521,38 @@ async function api(path,opt={}){
   return ct.includes('json')?r.json():r.text();
 }
 
+function updateStatus(cfg,recipients){
+  const bar=document.getElementById('statusBar');
+  if(cfg.smtp_user && recipients.length>0){
+    bar.className='status-bar ok';
+    bar.textContent=`設定OK — ${recipients.length}件の送信先に本締め後に自動送信します`;
+  } else if(!cfg.smtp_user){
+    bar.className='status-bar ng';
+    bar.textContent='メールアドレスとパスワードを設定してください';
+  } else {
+    bar.className='status-bar ng';
+    bar.textContent='送信先を追加してください';
+  }
+}
+
+let cachedCfg={}, cachedRecipients=[];
+
 async function loadConfig(){
   try{
     const c=await api(`/mail-config/${storeId}`);
-    document.getElementById('smtpHost').value=c.smtp_host||'smtp.gmail.com';
-    document.getElementById('smtpPort').value=c.smtp_port||587;
+    cachedCfg=c;
     document.getElementById('smtpUser').value=c.smtp_user||'';
     document.getElementById('fromName').value=c.from_name||'POS Start';
     document.getElementById('fromEmail').value=c.from_email||'';
+    // detect preset
+    if(c.smtp_host){
+      document.getElementById('smtpHost').value=c.smtp_host;
+      document.getElementById('smtpPort').value=c.smtp_port||587;
+      for(const [k,v] of Object.entries(PRESETS)){
+        if(c.smtp_host===v.host) selectPreset(k);
+      }
+    } else { selectPreset('gmail'); }
+    updateStatus(cachedCfg, cachedRecipients);
   }catch{}
 }
 
@@ -457,17 +567,26 @@ async function saveConfig(){
       from_email:document.getElementById('fromEmail').value,
       enabled:true
     }});
-    alert('設定を保存しました');
+    cachedCfg.smtp_user=document.getElementById('smtpUser').value;
+    updateStatus(cachedCfg, cachedRecipients);
+    alert('保存しました');
   }catch(e){alert('エラー: '+e.message)}
 }
 
 async function loadRecipients(){
   try{
     const list=await api(`/mail-recipients/${storeId}`);
-    document.getElementById('recipientList').innerHTML=list.map(r=>`<tr>
-      <td>${r.name||'-'}</td><td>${r.email}</td>
-      <td><button class="btn danger" onclick="delRecipient(${r.id})">削除</button></td>
-    </tr>`).join('');
+    cachedRecipients=list;
+    const el=document.getElementById('recipientList');
+    if(!list.length){
+      el.innerHTML='<div class="note" style="text-align:center;padding:16px">送信先が登録されていません</div>';
+    } else {
+      el.innerHTML=list.map(r=>`<div class="recipient-item">
+        <div style="flex:1"><div class="email">${r.email}</div>${r.name?`<div class="name">${r.name}</div>`:''}</div>
+        <button class="btn danger" onclick="delRecipient(${r.id})">削除</button>
+      </div>`).join('');
+    }
+    updateStatus(cachedCfg, cachedRecipients);
   }catch{}
 }
 
@@ -492,11 +611,10 @@ async function delRecipient(id){
 }
 
 async function testSend(){
-  if(!confirm('登録済みの送信先にテストメールを送信しますか？'))return;
+  if(!confirm('テストメールを送信しますか？'))return;
   try{
     const r=await api(`/mail/test-send/${storeId}`,{method:'POST'});
     alert(r.message||'テスト送信しました');
-    loadLogs();
   }catch(e){alert('エラー: '+e.message)}
 }
 
@@ -505,12 +623,12 @@ async function loadLogs(){
     const list=await api(`/mail-logs/${storeId}`);
     document.getElementById('logList').innerHTML=list.map(r=>`<tr>
       <td>${r.business_date}</td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${r.recipients}</td>
-      <td><span class="badge ${r.status}">${r.status==='sent'?'✅ 送信済':'❌ 失敗'}</span></td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${r.recipients}</td>
+      <td><span class="badge ${r.status}">${r.status==='sent'?'送信済':'失敗'}</span></td>
       <td style="font-size:11px">${r.sent_at?new Date(r.sent_at).toLocaleString('ja-JP'):''}</td>
     </tr>`).join('')||'<tr><td colspan="4" style="color:var(--muted)">履歴なし</td></tr>';
   }catch{}
 }
 
-loadConfig(); loadRecipients(); loadLogs();
+loadConfig(); loadRecipients();
 </script></body></html>""")
