@@ -420,6 +420,14 @@ async def notify_clients(event: str, data: dict = None):
     except Exception:
         pass
 
+def _safe_notify(event: str, data: dict = None):
+    """同期関数からWebSocket通知を安全に発火（スレッドセーフ）"""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(notify_clients(event, data))
+    except RuntimeError:
+        pass  # イベントループなし（ワーカースレッド）→スキップ
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws_manager.connect(ws)
@@ -955,7 +963,7 @@ def start_session(payload: SessionStartIn, x_role: Optional[Role]=Header(None, a
 
         # eager load してから辞書化
         s = db.query(Session).options(joinedload(Session.table)).get(s.id)
-        asyncio.get_event_loop().create_task(notify_clients("checkin", {"session_id": s.id}))
+        _safe_notify("checkin", {"session_id": s.id})
         out = SessionOut.model_validate(session_to_out_dict(s), from_attributes=True)
         return out
     finally:
@@ -1006,7 +1014,7 @@ def add_order(session_id: int, payload: OrderIn, x_role: Optional[Role] = Header
                   item_id=payload.item_id, qty=payload.qty, unit_price=item.price,
                   cast_id=payload.cast_id)
         db.add(o); db.commit(); db.refresh(o)
-        asyncio.get_event_loop().create_task(notify_clients("order", {"session_id": session_id}))
+        _safe_notify("order", {"session_id": session_id})
 
         # ドリンクバック自動記録（キャスト指定 + ドリンクカテゴリの場合）
         if payload.cast_id and item.category == "drink":
@@ -1038,7 +1046,7 @@ def add_payment(session_id: int, payload: PaymentIn, x_role: Optional[Role] = He
         p = Payment(store_id=s.store_id, session_id=session_id,
                     method=payload.method, amount=payload.amount)
         db.add(p); db.commit()
-        asyncio.get_event_loop().create_task(notify_clients("payment", {"session_id": session_id}))
+        _safe_notify("payment", {"session_id": session_id})
         return {"ok": True, "payment_id": p.id}
     finally:
         db.close()
@@ -1057,7 +1065,7 @@ def extend_session(session_id: int, x_role: Optional[Role] = Header(None, alias=
         check_closing_lock(db, s)
         s.set_minutes = int(s.set_minutes or 60) + int(s.extend_unit or 30)
         db.commit()
-        asyncio.get_event_loop().create_task(notify_clients("extend", {"session_id": session_id}))
+        _safe_notify("extend", {"session_id": session_id})
         return {"ok": True, "set_minutes": s.set_minutes}
     finally:
         db.close()
@@ -1074,7 +1082,7 @@ def checkout(session_id: int, x_role: Optional[Role] = Header(None, alias="X-Rol
         s.end_time = datetime.utcnow()
         inv = issue_invoice(db, s)
         db.commit()
-        asyncio.get_event_loop().create_task(notify_clients("checkout", {"session_id": session_id}))
+        _safe_notify("checkout", {"session_id": session_id})
         return {"ok": True, "invoice_no": inv.invoice_no}
     finally:
         db.close()
@@ -1113,7 +1121,7 @@ def change_guest_count(session_id: int, payload: GuestCountIn, x_role: Optional[
         check_closing_lock(db, s)
         s.guest_count = max(1, payload.guest_count)
         db.commit()
-        asyncio.get_event_loop().create_task(notify_clients("guest_count", {"session_id": session_id, "guest_count": s.guest_count}))
+        _safe_notify("guest_count", {"session_id": session_id, "guest_count": s.guest_count})
         return {"ok": True, "guest_count": s.guest_count}
     finally:
         db.close()
@@ -1141,7 +1149,7 @@ def move_table(session_id: int, payload: MoveTableIn, x_role: Optional[Role] = H
         old_table_id = s.table_id
         s.table_id = payload.new_table_id
         db.commit()
-        asyncio.get_event_loop().create_task(notify_clients("move_table", {"session_id": session_id, "old_table_id": old_table_id, "new_table_id": payload.new_table_id}))
+        _safe_notify("move_table", {"session_id": session_id, "old_table_id": old_table_id, "new_table_id": payload.new_table_id})
         return {"ok": True, "old_table_id": old_table_id, "new_table_id": payload.new_table_id, "new_table_name": new_table.name}
     finally:
         db.close()
@@ -1169,7 +1177,7 @@ def change_start_time(session_id: int, payload: StartTimeIn, x_role: Optional[Ro
         # 深夜帯(0-6時)で入力が昼の場合の補正は不要（そのまま使う）
         s.start_time = new_start
         db.commit()
-        asyncio.get_event_loop().create_task(notify_clients("start_time", {"session_id": session_id}))
+        _safe_notify("start_time", {"session_id": session_id})
         return {"ok": True, "start_time": new_start.isoformat()}
     finally:
         db.close()
@@ -1189,7 +1197,7 @@ def cancel_session(session_id: int, x_role: Optional[Role] = Header(None, alias=
         check_closing_lock(db, s)
         db.delete(s)
         db.commit()
-        asyncio.get_event_loop().create_task(notify_clients("cancel_session", {"session_id": session_id}))
+        _safe_notify("cancel_session", {"session_id": session_id})
         return {"ok": True, "deleted": session_id}
     finally:
         db.close()
@@ -1224,7 +1232,7 @@ def cancel_order(session_id: int, payload: OrderIn, x_role: Optional[Role] = Hea
                 o.qty -= to_cancel
                 to_cancel = 0
         db.commit()
-        asyncio.get_event_loop().create_task(notify_clients("cancel_order", {"session_id": session_id}))
+        _safe_notify("cancel_order", {"session_id": session_id})
         return {"ok": True, "remaining": to_cancel}
     finally:
         db.close()
@@ -1613,15 +1621,14 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
               <button class="bigbtn" id="btnExtend30" style="text-align:center;font-size:14px">延長 +30分</button>
               <button class="bigbtn" id="btnUnextend" style="text-align:center;font-size:14px">延長取消 -30分</button>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
-              <button class="bigbtn" id="btnAutoExtend" style="text-align:center;font-size:13px">自動延長 OFF</button>
-              <button class="bigbtn" id="btnCancelCheckin" style="text-align:center;font-size:13px;color:#fca5a5;border-color:#7f1d1d">入店取消</button>
-            </div>
-            <!-- 人数変更・席変更・スタート時間変更 -->
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
-              <button class="bigbtn" id="btnChangeGuest" style="text-align:center;font-size:12px" title="人数変更">人数変更</button>
-              <button class="bigbtn" id="btnMoveTable" style="text-align:center;font-size:12px" title="席移動">席変更</button>
-              <button class="bigbtn" id="btnChangeStart" style="text-align:center;font-size:12px" title="スタート時間変更">時間変更</button>
+              <button class="bigbtn" id="btnAutoExtend" style="text-align:center;font-size:12px">自動延長 OFF</button>
+              <button class="bigbtn" id="btnChangeGuest" style="text-align:center;font-size:12px;background:#1a2744;border-color:#3b82f6;color:#93c5fd">人数変更</button>
+              <button class="bigbtn" id="btnMoveTable" style="text-align:center;font-size:12px;background:#1a2744;border-color:#3b82f6;color:#93c5fd">席変更</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+              <button class="bigbtn" id="btnChangeStart" style="text-align:center;font-size:12px;background:#1a2744;border-color:#3b82f6;color:#93c5fd">時間変更</button>
+              <button class="bigbtn" id="btnCancelCheckin" style="text-align:center;font-size:12px;color:#fca5a5;border-color:#7f1d1d">入店取消</button>
             </div>
             <hr>
             <!-- 支払いエリア -->
@@ -1690,6 +1697,11 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
 <div id="toasts"></div>
 
 <script>
+/* ====== 認証チェック ====== */
+if (!sessionStorage.getItem('pos_auth')) {
+  window.location.href = '/';
+}
+
 /* ====== 共通 ====== */
 const $ = (id)=>document.getElementById(id);
 const role = ()=> $('role').value;
@@ -1991,7 +2003,7 @@ async function cancelCheckin(){
     toast('入店取消APIが未実装です','err');
     return;
   }
-  currentSessionId=null; $('selSess').textContent='-'; reflectAutoExtendBtn();
+  currentSessionId=null; currentBill=null; $('selSess').textContent='-'; reflectAutoExtendBtn();
   renderTimer(null); renderBill(null); await loadFloor(); refreshSales();
 }
 
@@ -2004,7 +2016,7 @@ async function checkout(){
   if (!currentSessionId) throw new Error('セッションがありません');
   try{ await api(`/sessions/${currentSessionId}/checkout`, {method:'POST'}); toast('会計を確定しました'); }
   catch(e){ console.warn(e); toast('会計API未実装の可能性（UIは続行）','err'); }
-  currentSessionId=null; $('selSess').textContent='-'; reflectAutoExtendBtn();
+  currentSessionId=null; currentBill=null; $('selSess').textContent='-'; reflectAutoExtendBtn();
   renderTimer(null); renderBill(null); await loadFloor(); refreshSales();
 }
 
@@ -2049,7 +2061,7 @@ async function changeStartTime(){
   const mm = String(now.getMinutes()).padStart(2,'0');
   const input = prompt(`新しいスタート時間を HH:MM 形式で入力:`, `${hh}:${mm}`);
   if (!input) return;
-  if (!/^\\d{1,2}:\\d{2}$/.test(input)) return toast('HH:MM形式で入力してください','err');
+  if (!/^\d{1,2}:\d{2}$/.test(input)) return toast('HH:MM形式で入力してください','err');
   await api(`/sessions/${currentSessionId}/start-time`, {method:'PATCH', body:{start_time: input}});
   toast(`スタート時間を ${input} に変更しました`); await refreshBill(); await loadFloor(); refreshSales();
 }
