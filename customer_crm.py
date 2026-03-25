@@ -136,7 +136,7 @@ def update_customer(cid: int, payload: CustomerUpdate, x_role: Optional[str] = H
     try:
         c = db.get(CustomerProfile, cid)
         if not c: raise HTTPException(404, "Customer not found")
-        for k, v in payload.dict(exclude_unset=True).items():
+        for k, v in (payload.model_dump(exclude_unset=True) if hasattr(payload, 'model_dump') else payload.dict(exclude_unset=True)).items():
             setattr(c, k, v)
         db.commit()
         return _to_dict(c)

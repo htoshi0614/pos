@@ -236,6 +236,14 @@ def do_final(
         existing.final_at = datetime.now(tz=timezone.utc)
         existing.report_json = json.dumps(report, ensure_ascii=False)
         db.commit()
+
+        # ポイントメール送信（バックグラウンド）
+        try:
+            from point_mail import trigger_point_mail
+            trigger_point_mail(store_id, business_date, report)
+        except Exception as e:
+            print(f"[closing] point_mail trigger error: {e}")
+
         return {"ok": True, "status": "final", "report": report}
     finally:
         db.close()

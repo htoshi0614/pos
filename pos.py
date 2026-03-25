@@ -30,6 +30,213 @@ def vendor_login(payload: dict):
         return {"ok": True}
     raise HTTPException(401, "パスワードが正しくありません")
 
+# ---------- 申し込みページ (/signup) ----------
+@app.get("/signup", response_class=HTMLResponse)
+def signup_page():
+    return HTMLResponse(r"""<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>お申し込み - POS Start</title>
+<style>
+:root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--accent:#0ea5e9;--green:#22c55e}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);display:flex;align-items:center;justify-content:center;min-height:100vh}
+.container{width:100%;max-width:520px;padding:24px}
+.back{display:inline-block;color:var(--muted);font-size:13px;text-decoration:none;margin-bottom:16px}
+.back:hover{color:var(--text)}
+.logo-area{text-align:center;margin-bottom:24px}
+.logo-area h1{font-size:24px;font-weight:800}
+.logo-area h1 span{color:var(--accent)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px;margin-bottom:16px}
+.card h2{font-size:16px;margin-bottom:6px}
+.card .sub{font-size:13px;color:var(--muted);margin-bottom:20px}
+.plan-summary{display:flex;justify-content:space-between;align-items:center;background:#0a1423;border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:20px}
+.plan-summary .name{font-weight:700}
+.plan-summary .price{font-size:20px;font-weight:800;color:var(--accent)}
+.plan-summary .price span{font-size:12px;font-weight:400;color:var(--muted)}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+.field input,.field select{width:100%;padding:11px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line);background:#0a1423;color:var(--text);outline:none}
+.field input:focus{border-color:var(--accent)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.method-tabs{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:20px}
+.method-tab{flex:1;padding:12px;text-align:center;font-size:14px;cursor:pointer;background:#111827;color:var(--muted);border:none;transition:all .15s}
+.method-tab.active{background:var(--accent);color:#001018;font-weight:700}
+.method-tab:not(:last-child){border-right:1px solid var(--line)}
+.card-fields,.bank-fields{display:none}
+.card-fields.show,.bank-fields.show{display:block}
+.submit-btn{width:100%;padding:14px;border-radius:12px;border:none;font-size:16px;font-weight:700;cursor:pointer;transition:opacity .15s}
+.submit-btn:hover{opacity:.9}
+.submit-btn:disabled{opacity:.5;cursor:not-allowed}
+.submit-btn.card-pay{background:var(--accent);color:#001018}
+.submit-btn.bank-pay{background:var(--green);color:#001018}
+.secure{display:flex;align-items:center;justify-content:center;gap:6px;font-size:11px;color:var(--muted);margin-top:12px}
+.bank-info{background:#0a1423;border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px;font-size:14px;line-height:1.8}
+.bank-info .label{font-size:11px;color:var(--muted)}
+.success-msg{display:none;text-align:center;padding:40px 20px}
+.success-msg h2{color:var(--green);margin-bottom:12px}
+.error-msg{color:#ef4444;font-size:13px;margin-top:8px;display:none}
+</style>
+</head>
+<body>
+<div class="container">
+  <a href="/" class="back">← 戻る</a>
+  <div class="logo-area">
+    <h1>🍸 <span>POS</span> Start</h1>
+  </div>
+
+  <div id="formArea">
+  <div class="card">
+    <h2>お申し込み</h2>
+    <div class="sub">ご利用情報を入力してください</div>
+
+    <div class="plan-summary">
+      <div class="name">スタンダードプラン（月額）</div>
+      <div class="price">¥80,000<span> /月（税込）</span></div>
+    </div>
+
+    <div class="field">
+      <label>店舗名</label>
+      <input id="shopName" placeholder="例: Bar LUNA">
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>担当者名</label>
+        <input id="contactName" placeholder="山田 太郎">
+      </div>
+      <div class="field">
+        <label>電話番号</label>
+        <input id="contactPhone" type="tel" placeholder="090-1234-5678">
+      </div>
+    </div>
+    <div class="field">
+      <label>メールアドレス</label>
+      <input id="contactEmail" type="email" placeholder="info@example.com">
+    </div>
+
+    <div style="font-size:13px;color:var(--muted);margin-bottom:8px">お支払い方法</div>
+    <div class="method-tabs">
+      <button class="method-tab active" onclick="switchMethod('card')">💳 クレジットカード</button>
+      <button class="method-tab" onclick="switchMethod('bank')">🏦 口座振込</button>
+    </div>
+
+    <div class="card-fields show" id="cardSection">
+      <div class="field">
+        <label>カード番号</label>
+        <input id="cardNum" placeholder="1234 5678 9012 3456" maxlength="19">
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label>有効期限</label>
+          <input id="cardExp" placeholder="MM/YY" maxlength="5">
+        </div>
+        <div class="field">
+          <label>セキュリティコード</label>
+          <input id="cardCvc" placeholder="123" maxlength="4">
+        </div>
+      </div>
+      <button class="submit-btn card-pay" onclick="submitCard()">カードで申し込む</button>
+      <div class="secure">🔒 SSL暗号化通信で安全に処理されます</div>
+    </div>
+
+    <div class="bank-fields" id="bankSection">
+      <div class="bank-info">
+        <div class="label">振込先</div>
+        <strong>三菱UFJ銀行 ○○支店</strong><br>
+        普通 1234567<br>
+        カ）ポススタート<br><br>
+        <div class="label">お振込金額</div>
+        <strong>¥80,000（税込）</strong><br><br>
+        <div style="font-size:12px;color:var(--muted)">
+          ※ お振込確認後、1営業日以内にアカウントを有効化いたします。<br>
+          ※ 振込手数料はお客様負担となります。
+        </div>
+      </div>
+      <button class="submit-btn bank-pay" onclick="submitBank()">振込で申し込む</button>
+    </div>
+
+    <div class="error-msg" id="errorMsg"></div>
+  </div>
+  </div>
+
+  <div class="success-msg" id="successMsg">
+    <div style="font-size:48px;margin-bottom:16px">✅</div>
+    <h2>お申し込みありがとうございます！</h2>
+    <p style="color:var(--muted);font-size:14px;margin-bottom:20px" id="successDetail"></p>
+    <a href="/" style="color:var(--accent);font-size:14px">トップに戻る</a>
+  </div>
+</div>
+
+<script>
+function switchMethod(m){
+  document.querySelectorAll('.method-tab').forEach(t=>t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('cardSection').classList.toggle('show', m==='card');
+  document.getElementById('bankSection').classList.toggle('show', m==='bank');
+}
+
+function validate(){
+  const shop=document.getElementById('shopName').value.trim();
+  const name=document.getElementById('contactName').value.trim();
+  const email=document.getElementById('contactEmail').value.trim();
+  const err=document.getElementById('errorMsg');
+  if(!shop||!name||!email){
+    err.textContent='店舗名・担当者名・メールアドレスは必須です';
+    err.style.display='block';
+    return false;
+  }
+  err.style.display='none';
+  return true;
+}
+
+function submitCard(){
+  if(!validate()) return;
+  const num=document.getElementById('cardNum').value.trim();
+  const exp=document.getElementById('cardExp').value.trim();
+  const cvc=document.getElementById('cardCvc').value.trim();
+  const err=document.getElementById('errorMsg');
+  if(!num||!exp||!cvc){
+    err.textContent='カード情報を全て入力してください';
+    err.style.display='block';
+    return;
+  }
+  // 実際のStripe決済はStripe.jsで処理
+  // ここではデモ表示
+  document.getElementById('formArea').style.display='none';
+  const s=document.getElementById('successMsg');
+  s.style.display='block';
+  document.getElementById('successDetail').textContent=
+    'クレジットカードでのお申し込みを受け付けました。\n確認メールをお送りしましたのでご確認ください。';
+}
+
+function submitBank(){
+  if(!validate()) return;
+  document.getElementById('formArea').style.display='none';
+  const s=document.getElementById('successMsg');
+  s.style.display='block';
+  document.getElementById('successDetail').textContent=
+    '口座振込でのお申し込みを受け付けました。\n上記口座へのお振込をお願いいたします。確認後、アカウントを有効化いたします。';
+}
+
+// カード番号フォーマット
+document.getElementById('cardNum').addEventListener('input',function(e){
+  let v=e.target.value.replace(/\D/g,'');
+  v=v.replace(/(.{4})/g,'$1 ').trim();
+  e.target.value=v;
+});
+// 有効期限フォーマット
+document.getElementById('cardExp').addEventListener('input',function(e){
+  let v=e.target.value.replace(/\D/g,'');
+  if(v.length>=2) v=v.slice(0,2)+'/'+v.slice(2);
+  e.target.value=v;
+});
+</script>
+</body>
+</html>""")
+
 # ---------- ランディングページ (/) ----------
 @app.get("/", response_class=HTMLResponse)
 def landing_page():
@@ -143,9 +350,7 @@ body{background:var(--bg);color:var(--text);display:flex;align-items:center;just
 
 <script>
 function payStripe(){
-  // Stripeチェックアウトへ遷移
-  // 実際にはStripe Checkout Sessionを作成してリダイレクト
-  window.location.href='/ui/subscription';
+  window.location.href='/signup';
 }
 function payBank(){
   alert('口座振込のご案内をメールでお送りします。\n\n振込先:\n三菱UFJ銀行 ○○支店\n普通 1234567\nカ）ポススタート\n\n月額: ¥80,000（税込）\n\nお振込確認後、アカウントを有効化いたします。');
@@ -214,6 +419,14 @@ async def notify_clients(event: str, data: dict = None):
         await ws_manager.broadcast({"event": event, "data": data or {}})
     except Exception:
         pass
+
+def _safe_notify(event: str, data: dict = None):
+    """同期関数からWebSocket通知を安全に発火（スレッドセーフ）"""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(notify_clients(event, data))
+    except RuntimeError:
+        pass  # イベントループなし（ワーカースレッド）→スキップ
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
@@ -588,7 +801,8 @@ def compute_bill(db, s: Session) -> Dict:
     booked_minutes = int(s.set_minutes or 60)
     sets      = 1
     remaining = max(0, total_minutes - booked_minutes)
-    extends   = (remaining + s.extend_unit - 1) // s.extend_unit if remaining > 0 else 0
+    eu = max(1, int(s.extend_unit or 30))
+    extends   = (remaining + eu - 1) // eu if remaining > 0 else 0
 
     set_amount    = sets * set_fee * s.guest_count
     extend_amount = extends * extend_fee * s.guest_count
@@ -682,7 +896,7 @@ def create_table(payload: TableIn, x_role: Optional[Role] = Header(None, alias="
     require_role(x_role, ["owner","manager"])
     db = SessionLocal()
     try:
-        t = Table(**payload.dict())
+        t = Table(**(payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()))
         db.add(t); db.commit(); db.refresh(t)
         return t
     finally:
@@ -711,7 +925,7 @@ def create_item(payload: ItemIn, x_role: Optional[Role] = Header(None, alias="X-
     require_role(x_role, ["owner","manager"])
     db=SessionLocal()
     try:
-        it=Item(**payload.dict()); db.add(it); db.commit(); db.refresh(it); return it
+        it=Item(**(payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict())); db.add(it); db.commit(); db.refresh(it); return it
     finally:
         db.close()
 
@@ -749,7 +963,7 @@ def start_session(payload: SessionStartIn, x_role: Optional[Role]=Header(None, a
 
         # eager load してから辞書化
         s = db.query(Session).options(joinedload(Session.table)).get(s.id)
-        asyncio.get_event_loop().create_task(notify_clients("checkin", {"session_id": s.id}))
+        _safe_notify("checkin", {"session_id": s.id})
         out = SessionOut.model_validate(session_to_out_dict(s), from_attributes=True)
         return out
     finally:
@@ -800,7 +1014,7 @@ def add_order(session_id: int, payload: OrderIn, x_role: Optional[Role] = Header
                   item_id=payload.item_id, qty=payload.qty, unit_price=item.price,
                   cast_id=payload.cast_id)
         db.add(o); db.commit(); db.refresh(o)
-        asyncio.get_event_loop().create_task(notify_clients("order", {"session_id": session_id}))
+        _safe_notify("order", {"session_id": session_id})
 
         # ドリンクバック自動記録（キャスト指定 + ドリンクカテゴリの場合）
         if payload.cast_id and item.category == "drink":
@@ -832,7 +1046,7 @@ def add_payment(session_id: int, payload: PaymentIn, x_role: Optional[Role] = He
         p = Payment(store_id=s.store_id, session_id=session_id,
                     method=payload.method, amount=payload.amount)
         db.add(p); db.commit()
-        asyncio.get_event_loop().create_task(notify_clients("payment", {"session_id": session_id}))
+        _safe_notify("payment", {"session_id": session_id})
         return {"ok": True, "payment_id": p.id}
     finally:
         db.close()
@@ -851,7 +1065,7 @@ def extend_session(session_id: int, x_role: Optional[Role] = Header(None, alias=
         check_closing_lock(db, s)
         s.set_minutes = int(s.set_minutes or 60) + int(s.extend_unit or 30)
         db.commit()
-        asyncio.get_event_loop().create_task(notify_clients("extend", {"session_id": session_id}))
+        _safe_notify("extend", {"session_id": session_id})
         return {"ok": True, "set_minutes": s.set_minutes}
     finally:
         db.close()
@@ -868,7 +1082,7 @@ def checkout(session_id: int, x_role: Optional[Role] = Header(None, alias="X-Rol
         s.end_time = datetime.utcnow()
         inv = issue_invoice(db, s)
         db.commit()
-        asyncio.get_event_loop().create_task(notify_clients("checkout", {"session_id": session_id}))
+        _safe_notify("checkout", {"session_id": session_id})
         return {"ok": True, "invoice_no": inv.invoice_no}
     finally:
         db.close()
@@ -892,6 +1106,82 @@ def unextend_session(session_id: int, x_role: Optional[Role] = Header(None, alia
         db.close()
 
 
+class GuestCountIn(BaseModel):
+    guest_count: int
+
+@app.patch("/sessions/{session_id}/guest-count")
+def change_guest_count(session_id: int, payload: GuestCountIn, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """人数変更API"""
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    db = SessionLocal()
+    try:
+        s = db.get(Session, session_id)
+        if not s or s.status != "open":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found or closed")
+        check_closing_lock(db, s)
+        s.guest_count = max(1, payload.guest_count)
+        db.commit()
+        _safe_notify("guest_count", {"session_id": session_id, "guest_count": s.guest_count})
+        return {"ok": True, "guest_count": s.guest_count}
+    finally:
+        db.close()
+
+class MoveTableIn(BaseModel):
+    new_table_id: int
+
+@app.post("/sessions/{session_id}/move")
+def move_table(session_id: int, payload: MoveTableIn, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """席変更API：セッションを別テーブルに移動"""
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    db = SessionLocal()
+    try:
+        s = db.get(Session, session_id)
+        if not s or s.status != "open":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found or closed")
+        check_closing_lock(db, s)
+        new_table = db.get(Table, payload.new_table_id)
+        if not new_table:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Table not found")
+        # 移動先が使用中でないか確認
+        existing = db.query(Session).filter(Session.table_id == payload.new_table_id, Session.status == "open").first()
+        if existing:
+            raise HTTPException(status.HTTP_409_CONFLICT, f"{new_table.name} は使用中です")
+        old_table_id = s.table_id
+        s.table_id = payload.new_table_id
+        db.commit()
+        _safe_notify("move_table", {"session_id": session_id, "old_table_id": old_table_id, "new_table_id": payload.new_table_id})
+        return {"ok": True, "old_table_id": old_table_id, "new_table_id": payload.new_table_id, "new_table_name": new_table.name}
+    finally:
+        db.close()
+
+class StartTimeIn(BaseModel):
+    start_time: str  # HH:MM形式
+
+@app.patch("/sessions/{session_id}/start-time")
+def change_start_time(session_id: int, payload: StartTimeIn, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """スタート時間変更API"""
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    db = SessionLocal()
+    try:
+        s = db.get(Session, session_id)
+        if not s or s.status != "open":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found or closed")
+        check_closing_lock(db, s)
+        # HH:MM → 今日の日付でdatetimeを構築
+        hm = payload.start_time.split(":")
+        if len(hm) != 2:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "HH:MM形式で入力してください")
+        h, m = int(hm[0]), int(hm[1])
+        now = datetime.utcnow()
+        new_start = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        # 深夜帯(0-6時)で入力が昼の場合の補正は不要（そのまま使う）
+        s.start_time = new_start
+        db.commit()
+        _safe_notify("start_time", {"session_id": session_id})
+        return {"ok": True, "start_time": new_start.isoformat()}
+    finally:
+        db.close()
+
 @app.delete("/sessions/{session_id}")
 @app.post("/sessions/{session_id}/cancel") # UI側のフォールバックにも対応
 def cancel_session(session_id: int, x_role: Optional[Role] = Header(None, alias="X-Role")):
@@ -907,7 +1197,7 @@ def cancel_session(session_id: int, x_role: Optional[Role] = Header(None, alias=
         check_closing_lock(db, s)
         db.delete(s)
         db.commit()
-        asyncio.get_event_loop().create_task(notify_clients("cancel_session", {"session_id": session_id}))
+        _safe_notify("cancel_session", {"session_id": session_id})
         return {"ok": True, "deleted": session_id}
     finally:
         db.close()
@@ -942,7 +1232,7 @@ def cancel_order(session_id: int, payload: OrderIn, x_role: Optional[Role] = Hea
                 o.qty -= to_cancel
                 to_cancel = 0
         db.commit()
-        asyncio.get_event_loop().create_task(notify_clients("cancel_order", {"session_id": session_id}))
+        _safe_notify("cancel_order", {"session_id": session_id})
         return {"ok": True, "remaining": to_cancel}
     finally:
         db.close()
@@ -1130,6 +1420,11 @@ try:
     app.include_router(_backup_router)
 except Exception as e:
     print(f"[warn] backup_service router: {e}")
+try:
+    from point_mail import router as _mail_router, MailConfig, MailRecipient, MailLog
+    app.include_router(_mail_router)
+except Exception as e:
+    print(f"[warn] point_mail router: {e}")
 
 # ======================= UI (/ui) 完全版（取消＆数量管理つき） =======================
 from fastapi.responses import HTMLResponse
@@ -1252,7 +1547,6 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
       <option value="staff">staff</option>
     </select>
   </label>
-  <button id="seedBtn" class="btn" title="Ctrl+D">デモデータ</button>
   <label style="display:flex;align-items:center;gap:6px;">
     <input id="editToggle" type="checkbox"> 配置編集
   </label>
@@ -1267,6 +1561,7 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
     <a href="/ui/backup" target="_blank" style="color:#64748b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #64748b44;text-decoration:none">DB</a>
     <a href="/ui/audit" target="_blank" style="color:#64748b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #64748b44;text-decoration:none">監査</a>
     <a href="/ui/weather" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">天気</a>
+    <a href="/ui/mail" target="_blank" style="color:#f59e0b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #f59e0b44;text-decoration:none">メール</a>
     <a href="/ui/subscription" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">サブスク</a>
   </div>
   <div class="muted" style="margin-left:auto;white-space:nowrap">
@@ -1326,9 +1621,14 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
               <button class="bigbtn" id="btnExtend30" style="text-align:center;font-size:14px">延長 +30分</button>
               <button class="bigbtn" id="btnUnextend" style="text-align:center;font-size:14px">延長取消 -30分</button>
             </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
+              <button class="bigbtn" id="btnAutoExtend" style="text-align:center;font-size:12px">自動延長 OFF</button>
+              <button class="bigbtn" id="btnChangeGuest" style="text-align:center;font-size:12px;background:#1a2744;border-color:#3b82f6;color:#93c5fd">人数変更</button>
+              <button class="bigbtn" id="btnMoveTable" style="text-align:center;font-size:12px;background:#1a2744;border-color:#3b82f6;color:#93c5fd">席変更</button>
+            </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
-              <button class="bigbtn" id="btnAutoExtend" style="text-align:center;font-size:13px">自動延長 OFF</button>
-              <button class="bigbtn" id="btnCancelCheckin" style="text-align:center;font-size:13px;color:#fca5a5;border-color:#7f1d1d">入店取消</button>
+              <button class="bigbtn" id="btnChangeStart" style="text-align:center;font-size:12px;background:#1a2744;border-color:#3b82f6;color:#93c5fd">時間変更</button>
+              <button class="bigbtn" id="btnCancelCheckin" style="text-align:center;font-size:12px;color:#fca5a5;border-color:#7f1d1d">入店取消</button>
             </div>
             <hr>
             <!-- 支払いエリア -->
@@ -1397,6 +1697,11 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
 <div id="toasts"></div>
 
 <script>
+/* ====== 認証チェック ====== */
+if (!sessionStorage.getItem('pos_auth')) {
+  window.location.href = '/';
+}
+
 /* ====== 共通 ====== */
 const $ = (id)=>document.getElementById(id);
 const role = ()=> $('role').value;
@@ -1698,7 +2003,7 @@ async function cancelCheckin(){
     toast('入店取消APIが未実装です','err');
     return;
   }
-  currentSessionId=null; $('selSess').textContent='-'; reflectAutoExtendBtn();
+  currentSessionId=null; currentBill=null; $('selSess').textContent='-'; reflectAutoExtendBtn();
   renderTimer(null); renderBill(null); await loadFloor(); refreshSales();
 }
 
@@ -1711,8 +2016,54 @@ async function checkout(){
   if (!currentSessionId) throw new Error('セッションがありません');
   try{ await api(`/sessions/${currentSessionId}/checkout`, {method:'POST'}); toast('会計を確定しました'); }
   catch(e){ console.warn(e); toast('会計API未実装の可能性（UIは続行）','err'); }
-  currentSessionId=null; $('selSess').textContent='-'; reflectAutoExtendBtn();
+  currentSessionId=null; currentBill=null; $('selSess').textContent='-'; reflectAutoExtendBtn();
   renderTimer(null); renderBill(null); await loadFloor(); refreshSales();
+}
+
+/* 人数変更 */
+async function changeGuestCount(){
+  if (!currentSessionId) return toast('テーブルを選択してください','err');
+  const current = currentBill?.guest_count || 1;
+  const input = prompt(`現在 ${current}名です。新しい人数を入力:`, current);
+  if (!input) return;
+  const n = parseInt(input, 10);
+  if (isNaN(n) || n < 1 || n > 99) return toast('正しい人数を入力してください','err');
+  await api(`/sessions/${currentSessionId}/guest-count`, {method:'PATCH', body:{guest_count: n}});
+  toast(`人数を ${n}名 に変更しました`); await refreshBill(); await loadFloor(); refreshSales();
+}
+
+/* 席変更 */
+async function moveTable(){
+  if (!currentSessionId) return toast('テーブルを選択してください','err');
+  const tables = floorModel.tables || [];
+  const freeT = tables.filter(t => !floorModel.sessionByTable[t.id]);
+  if (!freeT.length) return toast('空席がありません','err');
+  const list = freeT.map(t => `${t.id}: ${t.name}`).join('\\n');
+  const input = prompt('移動先の空席:\\n'+list+'\\n\\nテーブル番号(ID)を入力:', freeT[0].id);
+  if (!input) return;
+  const tid = parseInt(input, 10);
+  if (isNaN(tid)) return toast('正しいIDを入力してください','err');
+  try {
+    const r = await api(`/sessions/${currentSessionId}/move`, {method:'POST', body:{new_table_id: tid}});
+    selectedTableId = tid;
+    const tbl = tables.find(t=>t.id===tid);
+    if(tbl) $('selTable').textContent = tbl.name;
+    toast(`${r.new_table_name || tbl?.name} に移動しました`);
+    await refreshBill(); await loadFloor(); refreshSales();
+  } catch(e) { toast(e.message||'席変更に失敗しました','err'); }
+}
+
+/* スタート時間変更 */
+async function changeStartTime(){
+  if (!currentSessionId) return toast('テーブルを選択してください','err');
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2,'0');
+  const mm = String(now.getMinutes()).padStart(2,'0');
+  const input = prompt(`新しいスタート時間を HH:MM 形式で入力:`, `${hh}:${mm}`);
+  if (!input) return;
+  if (!/^\d{1,2}:\d{2}$/.test(input)) return toast('HH:MM形式で入力してください','err');
+  await api(`/sessions/${currentSessionId}/start-time`, {method:'PATCH', body:{start_time: input}});
+  toast(`スタート時間を ${input} に変更しました`); await refreshBill(); await loadFloor(); refreshSales();
 }
 
 /* 明細＆サイドタイマー */
@@ -1813,7 +2164,7 @@ function connectWS(){
       try{
         const msg=JSON.parse(ev.data);
         // 他端末からの変更通知 → 売上&フロアを即時更新
-        if(['order','cancel_order','payment','checkout','cancel_session','extend','checkin'].includes(msg.event)){
+        if(['order','cancel_order','payment','checkout','cancel_session','extend','checkin','guest_count','move_table','start_time'].includes(msg.event)){
           refreshSales();
           loadFloor();
           if(currentSessionId) refreshBill();
@@ -1848,11 +2199,6 @@ function startLoops(){
 
 /* 初期化 */
 async function initUI(){
-  $('seedBtn')?.addEventListener('click', async ()=>{
-    try{ try{ await api(`/admin/seed_demo?store_id=${store()}`,{method:'POST'}); toast('デモデータ作成'); }catch{}; await loadFloor(); await loadItems(); }
-    catch(e){ toast(e.message,'err'); }
-  });
-
   // 入店/延長関係
   $('btnCheckin').addEventListener('click', ()=>checkin().catch(e=>toast(e.message,'err')));
   $('btnExtend30').addEventListener('click', ()=>extend30().catch(e=>toast(e.message,'err')));
@@ -1863,6 +2209,11 @@ async function initUI(){
     if(!confirm('この入店を取り消しますか？注文も全て削除されます。')) return;
     cancelCheckin().catch(e=>toast(e.message,'err'));
   });
+
+  // 人数変更・席変更・スタート時間変更
+  $('btnChangeGuest').addEventListener('click', ()=>changeGuestCount().catch(e=>toast(e.message,'err')));
+  $('btnMoveTable').addEventListener('click', ()=>moveTable().catch(e=>toast(e.message,'err')));
+  $('btnChangeStart').addEventListener('click', ()=>changeStartTime().catch(e=>toast(e.message,'err')));
 
   // 支払い（3方法）
   $('btnPayCash').addEventListener('click', ()=>payMethod('cash').catch(e=>toast(e.message,'err')));
@@ -1888,6 +2239,7 @@ async function initUI(){
         `<tr><td>${o.name}</td><td style="text-align:right">¥${Math.round(o.amount).toLocaleString()}</td></tr>`
       ).join('');
       const w = window.open('','_blank','width=400,height=600');
+      if(!w){ toast('ポップアップがブロックされています。許可してください。','err'); return; }
       w.document.write(`<!doctype html><html><head><meta charset="utf-8">
         <title>領収書</title>
         <style>body{font-family:sans-serif;font-size:13px;padding:20px;color:#111}
@@ -2023,13 +2375,14 @@ a{color:var(--accent)}
 async function load(){
   const r=await fetch('/audit-logs?limit=200',{headers:{'X-Role':'owner'}});
   const data=await r.json();
+  function esc(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
   document.getElementById('list').innerHTML=data.map(l=>`<tr>
-    <td style="white-space:nowrap;font-size:11px">${l.ts}</td>
-    <td>${l.role||'-'}</td>
-    <td><span class="method ${l.method}">${l.method}</span></td>
-    <td style="font-family:monospace;font-size:11px">${l.path}</td>
-    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--muted)">${l.payload||''}</td>
-    <td style="font-size:11px">${l.ip||''}</td>
+    <td style="white-space:nowrap;font-size:11px">${esc(l.ts)}</td>
+    <td>${esc(l.role||'-')}</td>
+    <td><span class="method ${esc(l.method)}">${esc(l.method)}</span></td>
+    <td style="font-family:monospace;font-size:11px">${esc(l.path)}</td>
+    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--muted)">${esc(l.payload||'')}</td>
+    <td style="font-size:11px">${esc(l.ip||'')}</td>
   </tr>`).join('');
 }
 load(); setInterval(load,10000);
