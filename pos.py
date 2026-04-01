@@ -930,6 +930,23 @@ def list_tables(store_id:int, x_role: Optional[Role]=Header(None, alias="X-Role"
     finally:
         db.close()
 
+@app.delete("/tables/{table_id}")
+def delete_table(table_id: int, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    require_role(x_role, ["owner","manager"])
+    db = SessionLocal()
+    try:
+        t = db.query(Table).get(table_id)
+        if not t:
+            raise HTTPException(404, "table not found")
+        # Check if table has active session
+        active = db.query(Session).filter_by(table_id=table_id, status="open").first()
+        if active:
+            raise HTTPException(400, "active session exists on this table")
+        db.delete(t); db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
 @app.get("/casts", response_model=List[CastOut])
 def list_casts(store_id: int, x_role: Optional[Role]=Header(None, alias="X-Role")):
     require_role(x_role, ["owner","manager","cashier","staff"])
@@ -1531,21 +1548,73 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
 .qtyCtrl button{width:34px;height:34px;border-radius:10px;border:1px solid #32445f;background:#0f1a2a;color:#e5e7eb;font-size:18px;cursor:pointer}
 .qtyCtrl .val{min-width:28px;text-align:center;font-weight:700}
 
-/* モバイル対応 */
-@media(max-width:900px){
-  header{flex-wrap:wrap;gap:8px;padding:10px 12px}
-  header h1{font-size:15px}
-  .page{grid-template-columns:1fr;gap:10px;padding:10px}
-  .floor-wrap{height:40vh}
-  .side{gap:10px}
-  .grid{grid-template-columns:1fr}
-  header div[style*="gap:6px"]{flex-wrap:wrap}
+/* ハンバーガーメニュー */
+.hamburger{display:none;background:none;border:1px solid #334155;border-radius:8px;color:var(--text);font-size:22px;padding:6px 10px;cursor:pointer;line-height:1}
+.nav-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:90}
+.nav-drawer{display:none;position:fixed;top:0;right:0;width:260px;height:100%;background:#0f172a;border-left:1px solid var(--line);z-index:91;overflow-y:auto;padding:16px;flex-direction:column;gap:6px}
+.nav-drawer.open{display:flex}
+.nav-overlay.open{display:block}
+.nav-drawer a{display:block;padding:12px 14px;border-radius:10px;font-size:15px;text-decoration:none;border:1px solid #1f2937}
+.nav-drawer a:active{background:#1e293b}
+.nav-close{background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer;align-self:flex-end;padding:4px 8px}
+
+/* iPad横タブ切替 */
+.ipad-tabs{display:none;border-bottom:1px solid var(--line);background:var(--card)}
+.ipad-tabs button{flex:1;padding:14px 8px;font-size:16px;font-weight:700;background:none;border:none;border-bottom:3px solid transparent;color:var(--muted);cursor:pointer}
+.ipad-tabs button.active{border-color:var(--accent);color:var(--text)}
+
+/* iPad横向き (1024px以下) */
+@media(max-width:1100px){
+  .page{grid-template-columns:1fr 380px;gap:10px;padding:10px}
+  .table{min-width:120px !important;min-height:75px !important}
 }
+
+/* iPad縦向き & タブレット (768px-900px) */
+@media(max-width:900px){
+  .hamburger{display:inline-block}
+  #adminNav{display:none !important}
+  header{flex-wrap:wrap;gap:8px;padding:10px 12px}
+  header h1{font-size:16px}
+  #tableEditBtns .btn{font-size:14px !important;padding:10px 16px !important;border-radius:10px}
+  .page{grid-template-columns:1fr;gap:0;padding:0}
+  .ipad-tabs{display:flex}
+  .page>section.panel{display:none}
+  .page>aside.side{display:none}
+  .page>section.panel.ipad-active{display:block}
+  .page>aside.side.ipad-active{display:flex}
+  .floor-wrap{height:55vh}
+  .side{gap:10px;padding:10px}
+  .panel h2{padding:14px 16px;font-size:16px}
+  /* タッチ最適化 */
+  .bigbtn{min-height:52px;font-size:16px;padding:12px 14px}
+  .tab{padding:14px 10px;font-size:16px}
+  .table{min-width:130px !important;min-height:80px !important}
+  .table .name{font-size:20px}
+  .table .small{font-size:13px}
+  .table .ttime{font-size:16px}
+  .itemRow{padding:10px}
+  .qtyCtrl button{width:44px;height:44px;font-size:22px;border-radius:12px}
+  .qtyCtrl .val{font-size:18px;min-width:32px}
+  .itemName{font-size:16px}
+  select,input{font-size:16px;padding:10px 12px}
+  .grid{grid-template-columns:repeat(2,1fr);gap:8px}
+  .card h3{padding:12px 14px;font-size:15px}
+  .card .cbody{padding:12px 14px}
+  #timerRemain{font-size:36px !important}
+  #payAmount{font-size:20px !important;padding:12px !important}
+  .btn.solid{font-size:16px;padding:12px 16px}
+}
+
+/* スマホ (500px以下) */
 @media(max-width:500px){
-  .page{padding:6px}
-  .floor-wrap{height:35vh}
-  .bigbtn{font-size:14px;padding:8px 10px;min-height:40px}
-  .table{min-width:110px !important;min-height:70px !important}
+  .page{padding:0}
+  .floor-wrap{height:40vh}
+  .bigbtn{font-size:14px;padding:10px;min-height:44px}
+  .table{min-width:100px !important;min-height:65px !important}
+  .table .name{font-size:16px}
+  .grid{grid-template-columns:1fr}
+  .qtyCtrl button{width:40px;height:40px}
+  header h1{font-size:14px}
 }
 </style>
 </head>
@@ -1591,20 +1660,51 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
     <a href="/ui/mail" target="_blank" style="color:#f59e0b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #f59e0b44;text-decoration:none">メール</a>
     <a href="/ui/subscription" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">サブスク</a>
   </div>
-  <div class="muted" style="margin-left:auto;white-space:nowrap">
+  <div class="muted" style="margin-left:auto;white-space:nowrap;display:flex;align-items:center;gap:8px">
     <span id="selTable" class="mono" style="font-size:16px;font-weight:700;color:var(--accent)">-</span>
-    <span style="margin:0 4px">/</span>
+    <span style="margin:0 2px">/</span>
     SS:<span id="selSess" class="mono">-</span>
+    <button class="hamburger" id="menuBtn" onclick="toggleNavDrawer()">☰</button>
   </div>
 </header>
 
+<!-- ナビドロワー（iPad/スマホ用） -->
+<div class="nav-overlay" id="navOverlay" onclick="toggleNavDrawer()"></div>
+<div class="nav-drawer" id="navDrawer">
+  <button class="nav-close" onclick="toggleNavDrawer()">✕</button>
+  <a href="/ui/management" style="color:#f59e0b">📊 分析</a>
+  <a href="/ui/closing" style="color:#22c55e">📋 締め</a>
+  <a href="/ui/customers" style="color:#a855f7">👥 顧客台帳</a>
+  <a href="/ui/bottles" style="color:#ec4899">🍾 ボトルキープ</a>
+  <a href="/ui/tabs" style="color:#ef4444">📝 伝票</a>
+  <a href="/ui/pricing" style="color:#0ea5e9">💰 料金</a>
+  <a href="/ui/salary" style="color:#0ea5e9">💵 給与</a>
+  <a href="/ui/backup" style="color:#64748b">💾 DB</a>
+  <a href="/ui/audit" style="color:#64748b">🔍 監査</a>
+  <a href="/ui/weather" style="color:#0ea5e9">🌤 天気</a>
+  <a href="/ui/mail" style="color:#f59e0b">📧 メール</a>
+  <a href="/ui/subscription" style="color:#0ea5e9">💳 サブスク</a>
+</div>
+
+<!-- iPad用フロア/操作タブ -->
+<div class="ipad-tabs" id="ipadTabs">
+  <button class="active" onclick="switchIpadTab('floor',this)">フロア</button>
+  <button onclick="switchIpadTab('ops',this)">操作</button>
+</div>
+
 <div class="page">
-  <section class="panel">
-    <h2>フロア <span id="floorClock" class="mono muted" style="float:right;font-size:14px"></span></h2>
+  <section class="panel ipad-active" id="floorPanel">
+    <h2>フロア
+      <span id="tableEditBtns" style="display:none;margin-left:12px">
+        <button class="btn" onclick="addTable()" style="font-size:12px;padding:4px 10px;background:#14532d;border-color:#22c55e;color:#4ade80">+ テーブル追加</button>
+        <button class="btn" onclick="removeTable()" style="font-size:12px;padding:4px 10px;background:#7f1d1d;border-color:#ef4444;color:#fca5a5">- 選択テーブル削除</button>
+      </span>
+      <span id="floorClock" class="mono muted" style="float:right;font-size:14px"></span>
+    </h2>
     <div class="p"><div class="floor-wrap" id="floor"></div></div>
   </section>
 
-  <aside class="side">
+  <aside class="side" id="opsPanel">
     <!-- タイマーカード（常時上部に表示） -->
     <div class="card" id="timerCard" style="display:none">
       <div class="cbody" style="padding:12px">
@@ -1729,6 +1829,57 @@ if (!sessionStorage.getItem('pos_auth')) {
   window.location.href = '/';
 }
 
+/* ====== ハンバーガーメニュー & iPad切替 ====== */
+function toggleNavDrawer(){
+  document.getElementById('navDrawer').classList.toggle('open');
+  document.getElementById('navOverlay').classList.toggle('open');
+}
+function switchIpadTab(which, btn){
+  const fp=document.getElementById('floorPanel');
+  const op=document.getElementById('opsPanel');
+  document.querySelectorAll('.ipad-tabs button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  if(which==='floor'){
+    fp.classList.add('ipad-active'); op.classList.remove('ipad-active');
+  }else{
+    fp.classList.remove('ipad-active'); op.classList.add('ipad-active');
+  }
+}
+/* テーブルタップ時にiPadモードなら操作パネルに自動切替 */
+function autoSwitchToOps(){
+  if(window.innerWidth<=900){
+    const btn=document.querySelectorAll('.ipad-tabs button')[1];
+    if(btn) switchIpadTab('ops',btn);
+  }
+}
+
+/* ====== テーブル追加/削除 ====== */
+async function addTable(){
+  const name = prompt('テーブル名を入力（例: T-3）');
+  if(!name) return;
+  try{
+    const r = await api('/tables',{method:'POST',body:{store_id:store(),name:name,capacity:6,x:10,y:10}});
+    toast('テーブル追加',`${name} を追加しました`,'ok');
+    await loadFloor();
+  }catch(e){
+    toast('エラー',e.message||'追加に失敗しました','err');
+  }
+}
+async function removeTable(){
+  if(!selectedTableId){toast('エラー','削除するテーブルを選択してください','err');return;}
+  const tbl = floorModel.tables.find(t=>t.id===selectedTableId);
+  const tname = tbl?tbl.name:'テーブル';
+  if(!confirm(`${tname} を削除しますか？\n※使用中のテーブルは削除できません`)) return;
+  try{
+    await api(`/tables/${selectedTableId}`,{method:'DELETE'});
+    toast('テーブル削除',`${tname} を削除しました`,'ok');
+    selectedTableId=null; $('selTable').textContent='-';
+    await loadFloor();
+  }catch(e){
+    toast('エラー',e.message||'削除に失敗しました','err');
+  }
+}
+
 /* ====== 共通 ====== */
 const $ = (id)=>document.getElementById(id);
 const role = ()=> $('role').value;
@@ -1744,6 +1895,12 @@ function updateAdminNav(){
 document.addEventListener('DOMContentLoaded',()=>{
   updateAdminNav();
   $('role')?.addEventListener('change', updateAdminNav);
+  /* 配置編集チェックボックス */
+  const et=$('editToggle');
+  if(et) et.addEventListener('change',()=>{
+    const btns=$('tableEditBtns');
+    if(btns) btns.style.display=et.checked?'inline':'none';
+  });
 });
 
 let selectedTableId = null;
@@ -1855,6 +2012,7 @@ async function loadFloor(){
       $('selTable').textContent=t.name;
       document.querySelectorAll('.table').forEach(x=>x.classList.remove('sel'));
       el.classList.add('sel');
+      autoSwitchToOps();
 
       const sid=floorModel.sessionByTable[t.id];
       if (sid){
