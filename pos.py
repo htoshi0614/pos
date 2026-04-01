@@ -2194,6 +2194,7 @@ async function cancelCheckin(){
   }
   currentSessionId=null; currentBill=null; $('selSess').textContent='-'; reflectAutoExtendBtn();
   renderTimer(null); renderBill(null); await loadFloor(); refreshSales();
+  renderTimer(null); renderBill(null);
 }
 
 async function payCash(amount){
@@ -2207,6 +2208,7 @@ async function checkout(){
   catch(e){ console.warn(e); toast('会計API未実装の可能性（UIは続行）','err'); }
   currentSessionId=null; currentBill=null; $('selSess').textContent='-'; reflectAutoExtendBtn();
   renderTimer(null); renderBill(null); await loadFloor(); refreshSales();
+  renderTimer(null); renderBill(null);
 }
 
 /* 人数変更 */
@@ -2379,7 +2381,7 @@ async function autoExtendTick(){
 /* ループ */
 function startLoops(){
   ['tick','bill','sales','floor','floorTick'].forEach(k=>{ if(loops[k]) clearInterval(loops[k]); });
-  loops.tick=setInterval(()=>{ if(currentBill) renderTimer(currentBill); autoExtendTick(); updateFloorClock(); },1000);
+  loops.tick=setInterval(()=>{ if(currentBill&&currentSessionId) renderTimer(currentBill); else renderTimer(null); autoExtendTick(); updateFloorClock(); },1000);
   loops.bill=setInterval(()=>{ if(currentSessionId) refreshBill().catch(()=>{}); },5000);
   loops.sales=setInterval(refreshSales,10000); // WS補完用（10秒ごと）
   loops.floor=setInterval(()=>loadFloor().catch(()=>{}),5000);
