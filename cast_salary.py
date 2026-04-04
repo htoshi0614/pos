@@ -30,6 +30,13 @@ class CastSalaryConfig(Base):
     nom_fee_dohan        = Column(Float, default=0.0)   # 同伴料
     cast                 = relationship("Cast")
 
+class StoreDouhanConfig(Base):
+    __tablename__ = "store_douhan_configs"
+    id                = Column(Integer, primary_key=True)
+    store_id          = Column(Integer, ForeignKey("stores.id"), unique=True)
+    douhan_back_rate  = Column(Float, default=0.0)  # 同伴バック率 0-100 (%)
+    douhan_fee        = Column(Float, default=0.0)   # 同伴料（固定額、テーブルチャージに追加）
+
 class DrinkBackRecord(Base):
     __tablename__ = "drink_back_records"
     id         = Column(Integer, primary_key=True)
@@ -308,6 +315,84 @@ def record_drink_back(store_id: int, payload: DrinkBackIn,
     finally:
         db.close()
 
+# ─────────────────────────── 同伴バック設定 API ───────────────────────────
+
+@router.get("/douhan-config")
+def get_douhan_config(store_id: int, x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    db = SessionLocal()
+    try:
+        cfg = db.query(StoreDouhanConfig).filter_by(store_id=store_id).first()
+        if not cfg:
+            return {"store_id": store_id, "douhan_back_rate": 0.0, "douhan_fee": 0.0}
+        return {"store_id": cfg.store_id, "douhan_back_rate": cfg.douhan_back_rate, "douhan_fee": cfg.douhan_fee}
+    finally:
+        db.close()
+
+@router.post("/douhan-config")
+def save_douhan_config(payload: dict, x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ["owner","manager"])
+    store_id = payload.get("store_id")
+    rate = payload.get("douhan_back_rate", 0.0)
+    fee = payload.get("douhan_fee", 0.0)
+    if rate < 0 or rate > 100:
+        raise HTTPException(400, "douhan_back_rate must be 0-100")
+    db = SessionLocal()
+    try:
+        cfg = db.query(StoreDouhanConfig).filter_by(store_id=store_id).first()
+        if cfg:
+            cfg.douhan_back_rate = rate
+            cfg.douhan_fee = fee
+        else:
+            cfg = StoreDouhanConfig(store_id=store_id, douhan_back_rate=rate, douhan_fee=fee)
+            db.add(cfg)
+        db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
+@router.get("/douhan-stats")
+def get_douhan_stats(store_id: int, year: int = None, month: int = None,
+                     x_role: Optional[str] = Header(None, alias="X-Role")):
+    """同伴数・同伴率の集計"""
+    require_role(x_role, ADMIN_ROLES)
+    now_jst = datetime.now(tz=JST)
+    y = year or now_jst.year
+    m = month or now_jst.month
+    db = SessionLocal()
+    try:
+        from pos import Cast, Nomination, Session
+        casts = db.query(Cast).filter_by(store_id=store_id, is_active=True).all()
+        total_sessions = db.query(Session).filter_by(store_id=store_id).count()
+        results = []
+        for c in casts:
+            noms = db.query(Nomination).filter_by(store_id=store_id, cast_id=c.id, nomi_type="dohan").all()
+            month_count = 0
+            total_count = 0
+            for n in noms:
+                total_count += 1
+                nj = n.created_at.replace(tzinfo=timezone.utc).astimezone(JST)
+                if nj.year == y and nj.month == m:
+                    month_count += 1
+            # 同伴率 = 月間同伴数 / 月間出勤日数
+            from pos import Attendance
+            attends = db.query(Attendance).filter_by(store_id=store_id, person_type="cast", person_id=c.id).all()
+            work_days = 0
+            for a in attends:
+                if a.clock_in:
+                    aj = a.clock_in.replace(tzinfo=timezone.utc).astimezone(JST)
+                    if aj.year == y and aj.month == m:
+                        work_days += 1
+            douhan_rate = (month_count / work_days * 100) if work_days > 0 else 0
+            results.append({
+                "cast_id": c.id, "cast_name": c.name,
+                "month_count": month_count, "total_count": total_count,
+                "work_days": work_days, "douhan_rate": round(douhan_rate, 1)
+            })
+        return {"year": y, "month": m, "casts": results}
+    finally:
+        db.close()
+
 # ─────────────────────────── Salary UI ───────────────────────────
 
 @router.get("/ui/salary", response_class=HTMLResponse)
@@ -365,6 +450,39 @@ td.num{text-align:right;font-family:monospace}
     <button class="btn solid" onclick="loadReport()">給与計算</button>
     <button class="btn green" onclick="exportExcel()">Excel書き出し</button>
     <button class="btn" onclick="loadConfigs()">給与設定を表示</button>
+    <button class="btn" onclick="loadDouhanStats()" style="background:#4a1942;border-color:#e879f9;color:#f0abfc">同伴集計</button>
+    <button class="btn" onclick="toggleDouhanConfig()" style="background:#3b0764;border-color:#a855f7;color:#c084fc">同伴バック率設定</button>
+  </div>
+
+  <!-- 同伴バック率設定（店舗単位） -->
+  <div class="card" id="douhanConfigCard" style="display:none">
+    <h2>同伴バック率設定（店舗共通）</h2>
+    <p style="color:var(--muted);font-size:12px;margin-bottom:12px">マネージャー以上のみ変更可能</p>
+    <div class="grid3">
+      <label>同伴バック率 (0-100%)
+        <div class="row" style="gap:6px;align-items:center">
+          <input id="douhanRate" type="number" min="0" max="100" step="1" style="width:100px">
+          <span>%</span>
+        </div>
+      </label>
+      <label>同伴料（固定額/回）
+        <div class="row" style="gap:6px;align-items:center">
+          <span>¥</span><input id="douhanFee" type="number" min="0" step="100">
+        </div>
+      </label>
+    </div>
+    <div class="row" style="margin-top:12px;justify-content:flex-end">
+      <button class="btn solid" onclick="saveDouhanConfig()">保存</button>
+    </div>
+  </div>
+
+  <!-- 同伴集計 -->
+  <div class="card" id="douhanStatsCard" style="display:none">
+    <h2 id="douhanStatsTitle">同伴集計</h2>
+    <table>
+      <thead><tr><th>名前</th><th>月間同伴数</th><th>累計同伴数</th><th>月間出勤日</th><th>同伴率</th></tr></thead>
+      <tbody id="douhanStatsBody"></tbody>
+    </table>
   </div>
 
   <!-- 給与レポート -->
@@ -507,6 +625,52 @@ async function saveConfig(castId, storeId){
     }});
     alert('保存しました'); document.getElementById('editForm')?.remove();
     loadConfigs();
+  }catch(e){alert(e.message)}
+}
+
+/* ====== 同伴バック率設定 ====== */
+async function toggleDouhanConfig(){
+  const card=$('douhanConfigCard');
+  if(card.style.display==='none'){
+    card.style.display='';
+    const s=$('storeId').value;
+    try{
+      const d=await api(`/douhan-config?store_id=${s}`);
+      $('douhanRate').value=d.douhan_back_rate||0;
+      $('douhanFee').value=d.douhan_fee||0;
+    }catch{}
+  }else{
+    card.style.display='none';
+  }
+}
+async function saveDouhanConfig(){
+  const s=$('storeId').value;
+  const rate=parseFloat($('douhanRate').value||0);
+  const fee=parseFloat($('douhanFee').value||0);
+  if(rate<0||rate>100) return alert('バック率は0-100で入力してください');
+  try{
+    await api('/douhan-config',{method:'POST',body:{store_id:parseInt(s),douhan_back_rate:rate,douhan_fee:fee}});
+    alert('同伴バック率を保存しました');
+  }catch(e){alert(e.message)}
+}
+
+/* ====== 同伴集計 ====== */
+async function loadDouhanStats(){
+  const s=$('storeId').value, y=$('year').value, m=$('month').value;
+  try{
+    const d=await api(`/douhan-stats?store_id=${s}&year=${y}&month=${m}`);
+    $('douhanStatsCard').style.display='';
+    $('douhanStatsTitle').textContent=`${y}年${m}月 同伴集計`;
+    const tb=$('douhanStatsBody'); tb.innerHTML='';
+    (d.casts||[]).forEach(c=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${c.cast_name}</td>
+        <td class="num">${c.month_count}</td>
+        <td class="num">${c.total_count}</td>
+        <td class="num">${c.work_days}</td>
+        <td class="num" style="color:${c.douhan_rate>=50?'#22c55e':c.douhan_rate>=30?'#facc15':'#ef4444'};font-weight:700">${c.douhan_rate}%</td>`;
+      tb.appendChild(tr);
+    });
   }catch(e){alert(e.message)}
 }
 </script>

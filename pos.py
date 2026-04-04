@@ -1247,6 +1247,45 @@ def cancel_session(session_id: int, x_role: Optional[Role] = Header(None, alias=
         db.close()
 
 
+@app.post("/sessions/{session_id}/douhan")
+def record_douhan(session_id: int, payload: dict, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """同伴登録API"""
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    cast_id = payload.get("cast_id")
+    if not cast_id:
+        raise HTTPException(400, "cast_id is required")
+    db = SessionLocal()
+    try:
+        s = db.get(Session, session_id)
+        if not s or s.status != "open":
+            raise HTTPException(404, "Session not found or closed")
+        # 既に同伴登録済みかチェック
+        existing = db.query(Nomination).filter_by(session_id=session_id, nomi_type="dohan").first()
+        if existing:
+            raise HTTPException(400, "This session already has douhan registered")
+        nom = Nomination(store_id=s.store_id, session_id=session_id, cast_id=cast_id, nomi_type="dohan", fee=0.0)
+        db.add(nom)
+        db.commit()
+        _safe_notify("douhan", {"session_id": session_id, "cast_id": cast_id})
+        return {"ok": True, "nomination_id": nom.id}
+    finally:
+        db.close()
+
+@app.delete("/sessions/{session_id}/douhan")
+def cancel_douhan(session_id: int, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """同伴取消API"""
+    require_role(x_role, ["owner","manager","cashier"])
+    db = SessionLocal()
+    try:
+        nom = db.query(Nomination).filter_by(session_id=session_id, nomi_type="dohan").first()
+        if not nom:
+            raise HTTPException(404, "No douhan found for this session")
+        db.delete(nom)
+        db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
 @app.post("/sessions/{session_id}/orders/cancel")
 def cancel_order(session_id: int, payload: OrderIn, x_role: Optional[Role] = Header(None, alias="X-Role")):
     """
@@ -1753,8 +1792,9 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
               <button class="bigbtn" id="btnChangeGuest" style="text-align:center;font-size:12px;background:#1a2744;border-color:#3b82f6;color:#93c5fd">人数変更</button>
               <button class="bigbtn" id="btnMoveTable" style="text-align:center;font-size:12px;background:#1a2744;border-color:#3b82f6;color:#93c5fd">席変更</button>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
               <button class="bigbtn" id="btnChangeStart" style="text-align:center;font-size:12px;background:#1a2744;border-color:#3b82f6;color:#93c5fd">時間変更</button>
+              <button class="bigbtn" id="btnDouhan" style="text-align:center;font-size:12px;background:#4a1942;border-color:#e879f9;color:#f0abfc;font-weight:700">同伴</button>
               <button class="bigbtn" id="btnCancelCheckin" style="text-align:center;font-size:12px;color:#fca5a5;border-color:#7f1d1d">入店取消</button>
             </div>
             <hr>
@@ -2257,6 +2297,33 @@ async function changeStartTime(){
   toast(`スタート時間を ${input} に変更しました`); await refreshBill(); await loadFloor(); refreshSales();
 }
 
+/* 同伴登録 */
+async function recordDouhan(){
+  if (!currentSessionId) return toast('テーブルを選択してください','err');
+  // キャスト一覧を取得
+  let casts;
+  try{ casts = await api(`/casts?store_id=${store()}`); }
+  catch{ return toast('キャスト取得に失敗しました','err'); }
+  if(!casts||!casts.length) return toast('キャストが登録されていません','err');
+
+  // 選択ダイアログ生成
+  const options = casts.map(c=>`${c.id}: ${c.name}`).join('\n');
+  const input = prompt(`同伴キャストを選択\n番号を入力してください:\n\n${options}`);
+  if(!input) return;
+  const castId = parseInt(input.split(':')[0], 10);
+  if(isNaN(castId)) return toast('正しい番号を入力してください','err');
+  const cast = casts.find(c=>c.id===castId);
+  if(!cast) return toast('該当するキャストが見つかりません','err');
+
+  try{
+    await api(`/sessions/${currentSessionId}/douhan`, {method:'POST', body:{cast_id: castId}});
+    toast(`同伴: ${cast.name}`, `セッション ${currentSessionId} に同伴登録しました`, 'ok');
+    await refreshBill(); await loadFloor();
+  }catch(e){
+    toast('同伴登録エラー', e.message||'登録に失敗しました','err');
+  }
+}
+
 /* 明細＆サイドタイマー */
 async function refreshBill(){
   if (!currentSessionId) return;
@@ -2355,7 +2422,7 @@ function connectWS(){
       try{
         const msg=JSON.parse(ev.data);
         // 他端末からの変更通知 → 売上&フロアを即時更新
-        if(['order','cancel_order','payment','checkout','cancel_session','extend','checkin','guest_count','move_table','start_time'].includes(msg.event)){
+        if(['order','cancel_order','payment','checkout','cancel_session','extend','checkin','guest_count','move_table','start_time','douhan'].includes(msg.event)){
           refreshSales();
           loadFloor();
           if(currentSessionId) refreshBill();
@@ -2401,10 +2468,11 @@ async function initUI(){
     cancelCheckin().catch(e=>toast(e.message,'err'));
   });
 
-  // 人数変更・席変更・スタート時間変更
+  // 人数変更・席変更・スタート時間変更・同伴
   $('btnChangeGuest').addEventListener('click', ()=>changeGuestCount().catch(e=>toast(e.message,'err')));
   $('btnMoveTable').addEventListener('click', ()=>moveTable().catch(e=>toast(e.message,'err')));
   $('btnChangeStart').addEventListener('click', ()=>changeStartTime().catch(e=>toast(e.message,'err')));
+  $('btnDouhan').addEventListener('click', ()=>recordDouhan().catch(e=>toast(e.message,'err')));
 
   // 支払い（3方法）
   $('btnPayCash').addEventListener('click', ()=>payMethod('cash').catch(e=>toast(e.message,'err')));
