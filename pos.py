@@ -1320,6 +1320,68 @@ def cancel_order(session_id: int, payload: OrderIn, x_role: Optional[Role] = Hea
     finally:
         db.close()
 
+# ---------- 出退勤API ----------
+@app.post("/attendance/clock-in")
+def clock_in(payload: dict, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    store_id = payload.get("store_id")
+    cast_id = payload.get("cast_id")
+    if not store_id or not cast_id:
+        raise HTTPException(400, "store_id and cast_id required")
+    db = SessionLocal()
+    try:
+        # 既に出勤中かチェック
+        existing = db.query(Attendance).filter_by(
+            store_id=store_id, person_type="cast", person_id=cast_id, clock_out=None
+        ).first()
+        if existing:
+            raise HTTPException(400, "Already clocked in")
+        a = Attendance(store_id=store_id, person_type="cast", person_id=cast_id, clock_in=datetime.utcnow())
+        db.add(a); db.commit(); db.refresh(a)
+        return {"ok": True, "attendance_id": a.id}
+    finally:
+        db.close()
+
+@app.post("/attendance/clock-out")
+def clock_out(payload: dict, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    store_id = payload.get("store_id")
+    cast_id = payload.get("cast_id")
+    if not store_id or not cast_id:
+        raise HTTPException(400, "store_id and cast_id required")
+    db = SessionLocal()
+    try:
+        a = db.query(Attendance).filter_by(
+            store_id=store_id, person_type="cast", person_id=cast_id, clock_out=None
+        ).order_by(Attendance.clock_in.desc()).first()
+        if not a:
+            raise HTTPException(400, "Not clocked in")
+        a.clock_out = datetime.utcnow()
+        db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
+@app.get("/attendance/status")
+def attendance_status(store_id: int, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    db = SessionLocal()
+    try:
+        casts = db.query(Cast).filter_by(store_id=store_id, is_active=True).all()
+        result = []
+        for c in casts:
+            a = db.query(Attendance).filter_by(
+                store_id=store_id, person_type="cast", person_id=c.id, clock_out=None
+            ).first()
+            result.append({
+                "cast_id": c.id, "cast_name": c.name,
+                "clocked_in": a is not None,
+                "clock_in_time": a.clock_in.isoformat() if a else None
+            })
+        return result
+    finally:
+        db.close()
+
 @app.get("/closing")
 def closing(store_id: int, x_role: Optional[Role] = Header(None, alias="X-Role")):
     # 全ロール閲覧可（必要に応じて絞ってOK）
@@ -1697,6 +1759,7 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
     <a href="/ui/audit" target="_blank" style="color:#64748b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #64748b44;text-decoration:none">監査</a>
     <a href="/ui/weather" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">天気</a>
     <a href="/ui/mail" target="_blank" style="color:#f59e0b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #f59e0b44;text-decoration:none">メール</a>
+    <a href="/ui/attendance" target="_blank" style="color:#22c55e;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #22c55e44;text-decoration:none;font-weight:700">出退勤</a>
     <a href="/ui/subscription" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">サブスク</a>
   </div>
   <div class="muted" style="margin-left:auto;white-space:nowrap;display:flex;align-items:center;gap:8px">
@@ -1722,6 +1785,7 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
   <a href="/ui/audit" style="color:#64748b">🔍 監査</a>
   <a href="/ui/weather" style="color:#0ea5e9">🌤 天気</a>
   <a href="/ui/mail" style="color:#f59e0b">📧 メール</a>
+  <a href="/ui/attendance" style="color:#22c55e">🕐 出退勤</a>
   <a href="/ui/subscription" style="color:#0ea5e9">💳 サブスク</a>
 </div>
 
@@ -2645,4 +2709,123 @@ async function load(){
   </tr>`).join('');
 }
 load(); setInterval(load,10000);
+</script></body></html>""")
+
+# ======================= 出退勤UI =======================
+@app.get("/ui/attendance", response_class=HTMLResponse)
+def ui_attendance():
+    return HTMLResponse(r"""<!doctype html><html lang="ja"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>出退勤 - Girls Bar POS</title>
+<style>
+:root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--accent:#0ea5e9;--green:#22c55e;--red:#ef4444}
+*{box-sizing:border-box;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
+body{margin:0;background:var(--bg);color:var(--text)}
+header{position:sticky;top:0;z-index:40;display:flex;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line);background:rgba(11,18,32,.95);backdrop-filter:blur(6px)}
+header h1{margin:0;font-size:18px}
+.nav a{color:var(--accent);text-decoration:none;font-size:14px;padding:6px 10px;border-radius:8px;border:1px solid var(--line)}
+.container{max-width:700px;margin:0 auto;padding:24px 16px}
+.clock{text-align:center;font-size:48px;font-weight:900;font-family:ui-monospace,monospace;color:var(--accent);margin-bottom:24px}
+.date{text-align:center;font-size:16px;color:var(--muted);margin-bottom:8px}
+.cast-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
+.cast-card{background:var(--card);border:2px solid var(--line);border-radius:16px;padding:20px;text-align:center;cursor:pointer;transition:all .15s;user-select:none}
+.cast-card:active{transform:scale(.97)}
+.cast-card .name{font-size:20px;font-weight:700;margin-bottom:8px}
+.cast-card .status{font-size:14px;padding:4px 12px;border-radius:20px;display:inline-block}
+.cast-card.in{border-color:var(--green)}
+.cast-card.in .status{background:#14532d;color:#86efac}
+.cast-card.out{border-color:var(--line)}
+.cast-card.out .status{background:#1e1b2e;color:var(--muted)}
+.cast-card .time{font-size:12px;color:var(--muted);margin-top:6px}
+.toast{position:fixed;bottom:20px;right:20px;padding:14px 20px;border-radius:12px;font-size:15px;font-weight:700;z-index:100;animation:slide .2s ease-out}
+.toast.ok{background:#14532d;border:1px solid var(--green);color:#86efac}
+.toast.err{background:#450a0a;border:1px solid var(--red);color:#fca5a5}
+@keyframes slide{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}
+@media(max-width:500px){
+  .cast-grid{grid-template-columns:1fr 1fr}
+  .cast-card .name{font-size:17px}
+  .clock{font-size:36px}
+}
+</style></head><body>
+<header>
+  <h1>出退勤</h1>
+  <div class="nav" style="display:flex;gap:8px;margin-left:auto">
+    <a href="/ui">← フロア</a>
+    <a href="/ui/salary">給与</a>
+  </div>
+</header>
+<div class="container">
+  <div class="date" id="dateDisp"></div>
+  <div class="clock" id="clockDisp">--:--:--</div>
+  <label style="display:flex;align-items:center;gap:6px;margin-bottom:16px;color:var(--muted);font-size:13px">
+    店舗 <input id="storeId" type="number" value="1" style="width:70px;font-size:16px;padding:8px;border-radius:8px;border:1px solid #263244;background:#0a1220;color:var(--text)">
+  </label>
+  <div class="cast-grid" id="castGrid"></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+
+function updateClock(){
+  const now=new Date();
+  $('clockDisp').textContent=now.toLocaleTimeString('ja-JP');
+  const days=['日','月','火','水','木','金','土'];
+  $('dateDisp').textContent=`${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日 (${days[now.getDay()]})`;
+}
+setInterval(updateClock,1000); updateClock();
+
+async function api(path,opt={}){
+  const o={method:'GET',headers:{'Content-Type':'application/json','X-Role':'owner'},...opt};
+  if(o.body&&typeof o.body!=='string') o.body=JSON.stringify(o.body);
+  const r=await fetch(path,o);
+  if(!r.ok){const t=await r.text();throw new Error(t);}
+  return r.json();
+}
+
+function showToast(msg,type='ok'){
+  const t=document.createElement('div');
+  t.className='toast '+type; t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(),3000);
+}
+
+async function loadStatus(){
+  const s=$('storeId').value;
+  try{
+    const data=await api(`/attendance/status?store_id=${s}`);
+    const grid=$('castGrid'); grid.innerHTML='';
+    data.forEach(c=>{
+      const card=document.createElement('div');
+      card.className='cast-card '+(c.clocked_in?'in':'out');
+      let timeStr='';
+      if(c.clocked_in && c.clock_in_time){
+        const d=new Date(c.clock_in_time+'Z');
+        timeStr=d.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})+' から勤務中';
+      }
+      card.innerHTML=`<div class="name">${c.cast_name}</div>
+        <div class="status">${c.clocked_in?'出勤中':'退勤'}</div>
+        ${timeStr?`<div class="time">${timeStr}</div>`:''}`;
+      card.addEventListener('click',async()=>{
+        if(c.clocked_in){
+          if(!confirm(`${c.cast_name} を退勤にしますか？`)) return;
+          try{
+            await api('/attendance/clock-out',{method:'POST',body:{store_id:parseInt(s),cast_id:c.cast_id}});
+            showToast(`${c.cast_name} 退勤しました`);
+          }catch(e){showToast(e.message,'err');}
+        }else{
+          if(!confirm(`${c.cast_name} を出勤にしますか？`)) return;
+          try{
+            await api('/attendance/clock-in',{method:'POST',body:{store_id:parseInt(s),cast_id:c.cast_id}});
+            showToast(`${c.cast_name} 出勤しました`);
+          }catch(e){showToast(e.message,'err');}
+        }
+        loadStatus();
+      });
+      grid.appendChild(card);
+    });
+  }catch(e){showToast(e.message,'err');}
+}
+
+$('storeId').addEventListener('change',loadStatus);
+loadStatus();
+setInterval(loadStatus,30000);
 </script></body></html>""")
