@@ -459,7 +459,7 @@ a{color:var(--accent)}
 </div>
 
 <script>
-const storeId=1, H={'Content-Type':'application/json','X-Role':'owner'};
+const storeId=1, H={'Content-Type':'application/json','X-Role':'owner','X-Token':sessionStorage.getItem('pos_token')||''};
 const PRESETS={
   gmail:{
     host:'smtp.gmail.com',port:587,
@@ -516,6 +516,7 @@ async function api(path,opt={}){
   const o={method:'GET',headers:H,...opt};
   if(o.body&&typeof o.body!=='string') o.body=JSON.stringify(o.body);
   const r=await fetch(path,o);
+  if(r.status===401){sessionStorage.clear();window.location.href='/';return;}
   if(!r.ok) throw new Error(await r.text());
   const ct=r.headers.get('content-type')||'';
   return ct.includes('json')?r.json():r.text();

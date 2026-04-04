@@ -340,9 +340,11 @@ if(params.get('canceled')==='1'){
 }
 
 async function api(path,opt={}){
-  const o={method:'GET',headers:{'Content-Type':'application/json','X-Role':'owner'},...opt};
+  const tk=sessionStorage.getItem('pos_token')||'';
+  const o={method:'GET',headers:{'Content-Type':'application/json','X-Role':'owner','X-Token':tk},...opt};
   if(o.body&&typeof o.body!=='string') o.body=JSON.stringify(o.body);
   const r=await fetch(path,o);
+  if(r.status===401){sessionStorage.clear();window.location.href='/';return;}
   if(!r.ok) throw new Error(await r.text());
   const ct=r.headers.get('content-type')||'';
   return ct.includes('json')?r.json():r.text();
