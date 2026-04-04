@@ -633,7 +633,9 @@ document.querySelectorAll('.section-tab').forEach(tab=>{
 });
 
 async function api(path){
-  const r=await fetch(path,{headers:{'X-Role':'owner'}});
+  const tk=sessionStorage.getItem('pos_token')||'';
+  const r=await fetch(path,{headers:{'X-Role':'owner','X-Token':tk}});
+  if(r.status===401){sessionStorage.clear();window.location.href='/';return;}
   if(!r.ok) throw new Error(await r.text());
   return r.json();
 }

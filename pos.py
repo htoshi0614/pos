@@ -1,9 +1,9 @@
 # app.py
 from datetime import datetime, date
 from typing import List, Optional, Dict, Literal
-import json, hashlib, asyncio, os
-from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse
+import json, hashlib, asyncio, os, secrets, time
+from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect, Request, Cookie
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, Float, ForeignKey, Boolean, Text, UniqueConstraint
@@ -19,16 +19,71 @@ from db_shared import Base, engine, SessionLocal
 
 app = FastAPI(title="Cabaret POS Full")
 
-# ---------- 業者パスワード ----------
-VENDOR_PASSWORD = os.environ.get("POS_VENDOR_PASSWORD", "posstart2024")
+# ---------- セキュリティ ----------
+VENDOR_PASSWORD_HASH = os.environ.get("POS_VENDOR_PASSWORD_HASH", "")
+VENDOR_PASSWORD_PLAIN = os.environ.get("POS_VENDOR_PASSWORD", "posstart2024")
+
+def _hash_pw(pw: str) -> str:
+    return hashlib.sha256(("pos_salt_v1:" + pw).encode()).hexdigest()
+
+def _verify_pw(pw: str) -> bool:
+    if VENDOR_PASSWORD_HASH:
+        return _hash_pw(pw) == VENDOR_PASSWORD_HASH
+    return pw == VENDOR_PASSWORD_PLAIN
+
+# トークン管理（サーバー側セッション）
+_active_tokens: Dict[str, dict] = {}  # token -> {"role": str, "created": float}
+def _create_token(role: str = "owner") -> str:
+    token = secrets.token_urlsafe(32)
+    _active_tokens[token] = {"role": role, "created": time.time()}
+    return token
+
+def _validate_token(token: str) -> Optional[dict]:
+    if not token:
+        return None
+    info = _active_tokens.get(token)
+    if not info:
+        return None
+    # 24時間で期限切れ
+    if time.time() - info["created"] > 86400:
+        del _active_tokens[token]
+        return None
+    return info
+
+# ログイン試行制限
+_login_attempts: Dict[str, list] = {}  # ip -> [timestamp, ...]
+MAX_ATTEMPTS = 5
+LOCKOUT_SECONDS = 300  # 5分
+
+def _check_rate_limit(ip: str) -> bool:
+    now = time.time()
+    attempts = _login_attempts.get(ip, [])
+    # 古い試行を削除
+    attempts = [t for t in attempts if now - t < LOCKOUT_SECONDS]
+    _login_attempts[ip] = attempts
+    return len(attempts) < MAX_ATTEMPTS
+
+def _record_attempt(ip: str):
+    now = time.time()
+    if ip not in _login_attempts:
+        _login_attempts[ip] = []
+    _login_attempts[ip].append(now)
 
 @app.post("/auth/vendor-login")
-def vendor_login(payload: dict):
-    """業者パスワード認証"""
+def vendor_login(payload: dict, request: Request):
+    """業者パスワード認証（レート制限・トークン発行）"""
+    ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(ip):
+        raise HTTPException(429, "ログイン試行回数が上限に達しました。5分後にお試しください。")
     pw = payload.get("password", "")
-    if pw == VENDOR_PASSWORD:
-        return {"ok": True}
-    raise HTTPException(401, "パスワードが正しくありません")
+    if _verify_pw(pw):
+        token = _create_token("owner")
+        resp = JSONResponse({"ok": True, "token": token})
+        resp.set_cookie("pos_token", token, httponly=True, samesite="lax", max_age=86400)
+        return resp
+    _record_attempt(ip)
+    remaining = MAX_ATTEMPTS - len(_login_attempts.get(ip, []))
+    raise HTTPException(401, f"パスワードが正しくありません（残り{remaining}回）")
 
 # ---------- 申し込みページ (/signup) ----------
 @app.get("/signup", response_class=HTMLResponse)
@@ -369,7 +424,9 @@ async function vendorLogin(){
   try{
     const r=await fetch('/auth/vendor-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
     if(r.ok){
+      const d=await r.json();
       sessionStorage.setItem('pos_auth','vendor');
+      if(d.token) sessionStorage.setItem('pos_token', d.token);
       window.location.href='/ui';
     }else{
       const d=await r.json();
@@ -436,6 +493,21 @@ async def websocket_endpoint(ws: WebSocket):
             await ws.receive_text()
     except WebSocketDisconnect:
         ws_manager.disconnect(ws)
+
+# ---------- API認証ミドルウェア ----------
+_PUBLIC_PATHS = {"/", "/auth/vendor-login", "/signup", "/ws", "/docs", "/openapi.json", "/favicon.ico"}
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    # 公開パス・UIページ・静的ファイルはスキップ
+    if path in _PUBLIC_PATHS or path.startswith("/ui"):
+        return await call_next(request)
+    # APIはトークン検証
+    token = request.cookies.get("pos_token") or request.headers.get("X-Token", "")
+    if not _validate_token(token):
+        return JSONResponse({"detail": "認証が必要です"}, status_code=401)
+    return await call_next(request)
 
 # ---------- 監査ログミドルウェア ----------
 @app.middleware("http")
@@ -2026,10 +2098,12 @@ document.addEventListener('click', (e)=>{
 
 /* API */
 async function api(path, opt={}) {
-  const headers = {'Content-Type':'application/json','X-Role': role()};
+  const tk = sessionStorage.getItem('pos_token')||'';
+  const headers = {'Content-Type':'application/json','X-Role': role(), 'X-Token': tk};
   const o = Object.assign({method:'GET', headers}, opt);
   if (o.body && typeof o.body !== 'string') o.body = JSON.stringify(o.body);
   const res = await fetch(path, o);
+  if (res.status===401) { sessionStorage.clear(); window.location.href='/'; return; }
   if (!res.ok) { throw new Error(`${res.status} ${await res.text()}`); }
   const ct = res.headers.get('content-type')||'';
   return ct.includes('application/json') ? res.json() : res.text();
@@ -2774,9 +2848,11 @@ function updateClock(){
 setInterval(updateClock,1000); updateClock();
 
 async function api(path,opt={}){
-  const o={method:'GET',headers:{'Content-Type':'application/json','X-Role':'owner'},...opt};
+  const tk=sessionStorage.getItem('pos_token')||'';
+  const o={method:'GET',headers:{'Content-Type':'application/json','X-Role':'owner','X-Token':tk},...opt};
   if(o.body&&typeof o.body!=='string') o.body=JSON.stringify(o.body);
   const r=await fetch(path,o);
+  if(r.status===401){sessionStorage.clear();window.location.href='/';return;}
   if(!r.ok){const t=await r.text();throw new Error(t);}
   return r.json();
 }

@@ -599,9 +599,11 @@ function toast(msg,type='ok'){
 function yen(v){return '¥'+(Math.round(v||0)).toLocaleString();}
 
 async function api(path,opts={}){
-  const h={'X-Role':ROLE,...(opts.headers||{})};
+  const tk=sessionStorage.getItem('pos_token')||'';
+  const h={'X-Role':ROLE,'X-Token':tk,...(opts.headers||{})};
   if(opts.body&&typeof opts.body==='object'){h['Content-Type']='application/json';opts.body=JSON.stringify(opts.body);}
   const r=await fetch(path,{...opts,headers:h});
+  if(r.status===401){sessionStorage.clear();window.location.href='/';return;}
   if(!r.ok){const t=await r.text();throw new Error(t);}
   return r.json();
 }
