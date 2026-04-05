@@ -2,6 +2,7 @@
 from datetime import datetime, date
 from typing import List, Optional, Dict, Literal
 import json, hashlib, asyncio, os, secrets, time
+from contextvars import ContextVar
 from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect, Request, Cookie
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -20,16 +21,71 @@ from db_shared import Base, engine, SessionLocal
 app = FastAPI(title="Cabaret POS Full")
 
 # ---------- セキュリティ ----------
-VENDOR_PASSWORD_HASH = os.environ.get("POS_VENDOR_PASSWORD_HASH", "")
-VENDOR_PASSWORD_PLAIN = os.environ.get("POS_VENDOR_PASSWORD", "posstart2024")
+# パスワードファイル（初回起動時に自動生成）
+import string as _string
+_CRED_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".pos_credentials")
+
+def _generate_password(length: int = 8) -> str:
+    """英数字のみのランダムパスワード（IME変換の誤入力防止）"""
+    chars = _string.ascii_letters + _string.digits
+    return ''.join(secrets.choice(chars) for _ in range(length))
+
+def _load_or_create_credentials() -> dict:
+    """パスワードをファイルから読み込み。なければ自動生成して保存"""
+    creds = {}
+    if os.path.exists(_CRED_FILE):
+        try:
+            with open(_CRED_FILE, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if "=" in line and not line.startswith("#"):
+                        k, v = line.split("=", 1)
+                        creds[k.strip()] = v.strip()
+        except Exception:
+            pass
+    # 環境変数で上書き可能
+    owner_pw = os.environ.get("POS_OWNER_PASSWORD") or creds.get("OWNER_PASSWORD", "")
+    staff_pw = os.environ.get("POS_STAFF_PASSWORD") or creds.get("STAFF_PASSWORD", "")
+    # 未設定なら自動生成
+    changed = False
+    if not owner_pw:
+        owner_pw = _generate_password(8)
+        changed = True
+    if not staff_pw:
+        staff_pw = _generate_password(6)
+        changed = True
+    if changed or not os.path.exists(_CRED_FILE):
+        try:
+            with open(_CRED_FILE, "w", encoding="utf-8") as f:
+                f.write("# POS Start ログインパスワード（自動生成）\n")
+                f.write("# このファイルを削除すると次回起動時に再生成されます\n")
+                f.write(f"OWNER_PASSWORD={owner_pw}\n")
+                f.write(f"STAFF_PASSWORD={staff_pw}\n")
+            print(f"\n{'='*50}")
+            print(f"  POS Start パスワード（初回自動生成）")
+            print(f"  オーナー用: {owner_pw}")
+            print(f"  スタッフ用: {staff_pw}")
+            print(f"  ※ファイル: {_CRED_FILE}")
+            print(f"{'='*50}\n")
+        except Exception as e:
+            print(f"[WARN] パスワードファイル保存失敗: {e}")
+    return {"owner": owner_pw, "staff": staff_pw}
+
+_PASSWORDS = _load_or_create_credentials()
 
 def _hash_pw(pw: str) -> str:
     return hashlib.sha256(("pos_salt_v1:" + pw).encode()).hexdigest()
 
-def _verify_pw(pw: str) -> bool:
-    if VENDOR_PASSWORD_HASH:
-        return _hash_pw(pw) == VENDOR_PASSWORD_HASH
-    return pw == VENDOR_PASSWORD_PLAIN
+def _verify_pw_role(pw: str) -> Optional[str]:
+    """パスワードを検証し、一致したロールを返す（不一致はNone）"""
+    if pw == _PASSWORDS["owner"]:
+        return "owner"
+    if pw == _PASSWORDS["staff"]:
+        return "staff"
+    return None
+
+# リクエストごとのトークンロール（ContextVar）
+_current_token_role: ContextVar[str] = ContextVar("token_role", default="")
 
 # トークン管理（サーバー側セッション）
 _active_tokens: Dict[str, dict] = {}  # token -> {"role": str, "created": float}
@@ -71,19 +127,49 @@ def _record_attempt(ip: str):
 
 @app.post("/auth/vendor-login")
 def vendor_login(payload: dict, request: Request):
-    """業者パスワード認証（レート制限・トークン発行）"""
+    """業者パスワード認証（レート制限・ロール別トークン発行）"""
     ip = request.client.host if request.client else "unknown"
     if not _check_rate_limit(ip):
         raise HTTPException(429, "ログイン試行回数が上限に達しました。5分後にお試しください。")
     pw = payload.get("password", "")
-    if _verify_pw(pw):
-        token = _create_token("owner")
-        resp = JSONResponse({"ok": True, "token": token})
+    matched_role = _verify_pw_role(pw)
+    if matched_role:
+        token = _create_token(matched_role)
+        resp = JSONResponse({"ok": True, "token": token, "role": matched_role})
         resp.set_cookie("pos_token", token, httponly=True, samesite="lax", max_age=86400)
         return resp
     _record_attempt(ip)
     remaining = MAX_ATTEMPTS - len(_login_attempts.get(ip, []))
     raise HTTPException(401, f"パスワードが正しくありません（残り{remaining}回）")
+
+@app.get("/auth/passwords")
+def get_passwords():
+    """現在のパスワードを表示（ownerのみ — ミドルウェアでトークン認証済み）"""
+    token_role = _current_token_role.get("")
+    if token_role != "owner":
+        raise HTTPException(403, "オーナーのみ閲覧可能です")
+    return {"owner": _PASSWORDS["owner"], "staff": _PASSWORDS["staff"]}
+
+@app.post("/auth/passwords/regenerate")
+def regenerate_passwords():
+    """パスワードを再生成（ownerのみ）"""
+    global _PASSWORDS
+    token_role = _current_token_role.get("")
+    if token_role != "owner":
+        raise HTTPException(403, "オーナーのみ変更可能です")
+    _PASSWORDS["owner"] = _generate_password(8)
+    _PASSWORDS["staff"] = _generate_password(6)
+    try:
+        with open(_CRED_FILE, "w", encoding="utf-8") as f:
+            f.write("# POS Start ログインパスワード（自動生成）\n")
+            f.write("# このファイルを削除すると次回起動時に再生成されます\n")
+            f.write(f"OWNER_PASSWORD={_PASSWORDS['owner']}\n")
+            f.write(f"STAFF_PASSWORD={_PASSWORDS['staff']}\n")
+    except Exception:
+        pass
+    # 既存トークンを全て無効化（再ログインが必要）
+    _active_tokens.clear()
+    return {"ok": True, "owner": _PASSWORDS["owner"], "staff": _PASSWORDS["staff"]}
 
 # ---------- 申し込みページ (/signup) ----------
 @app.get("/signup", response_class=HTMLResponse)
@@ -427,6 +513,7 @@ async function vendorLogin(){
       const d=await r.json();
       sessionStorage.setItem('pos_auth','vendor');
       if(d.token) sessionStorage.setItem('pos_token', d.token);
+      if(d.role) sessionStorage.setItem('pos_role', d.role);
       window.location.href='/ui';
     }else{
       const d=await r.json();
@@ -505,8 +592,13 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
     # APIはトークン検証
     token = request.cookies.get("pos_token") or request.headers.get("X-Token", "")
-    if not _validate_token(token):
+    token_info = _validate_token(token)
+    if not token_info:
         return JSONResponse({"detail": "認証が必要です"}, status_code=401)
+    # トークンのロールをリクエストstateとContextVarに保存
+    tr = token_info.get("role", "staff")
+    request.state.token_role = tr
+    _current_token_role.set(tr)
     return await call_next(request)
 
 # ---------- 監査ログミドルウェア ----------
@@ -523,7 +615,7 @@ async def audit_middleware(request: Request, call_next):
                 body_str = f"query={dict(request.query_params)}"
             except Exception:
                 pass
-            role_val = request.headers.get("X-Role", "")
+            role_val = _current_token_role.get("") or request.headers.get("X-Role", "")
             ip = request.client.host if request.client else ""
             log = AuditLog(
                 actor_role=role_val,
@@ -541,11 +633,20 @@ async def audit_middleware(request: Request, call_next):
 
 # ---------- Auth / Role ----------
 Role = Literal["owner", "manager", "cashier", "staff"]
+
 def require_role(role_header: Optional[str], allowed: List[str]):
-    if not role_header:
+    """ロール検証 — トークンロールで上書きしてクライアント偽装を防止"""
+    token_role = _current_token_role.get("")
+    if token_role and token_role != "owner":
+        # owner以外はトークンのロールを強制（X-Role偽装防止）
+        effective = token_role
+    else:
+        # ownerトークン or トークンなし（公開パス）はヘッダー値を許可
+        effective = role_header or token_role or None
+    if not effective:
         raise HTTPException(401, "Missing X-Role")
-    if role_header not in allowed:
-        raise HTTPException(403, f"Role '{role_header}' not allowed for this action")
+    if effective not in allowed:
+        raise HTTPException(403, f"Role '{effective}' not allowed for this action")
 
 def check_closing_lock(db, session_obj):
     """本締め済みの営業日に属するセッションへの変更をブロック"""
@@ -617,6 +718,9 @@ class Session(Base):
     extend_unit = Column(Integer, default=30)
     status = Column(String, default="open")
     note = Column(Text, default="")
+    discount_label = Column(String, default="")        # 適用中の割引名
+    discount_type = Column(String, default="")         # fixed/rate/set_override/free_drink
+    discount_value = Column(Float, default=0.0)        # 割引値
     table = relationship("Table")
     customer = relationship("Customer")
     orders = relationship("Order", back_populates="session", cascade="all,delete")
@@ -828,7 +932,7 @@ seed()
 
 # ---------- 拡張モジュールのテーブル作成 ----------
 try:
-    from pricing_engine import PricingConfig, TimeSlotRule
+    from pricing_engine import PricingConfig, TimeSlotRule, DiscountRule
     from cast_salary import CastSalaryConfig, DrinkBackRecord
     from weather_service import WeatherConfig, StaffSchedule
     from stripe_service import StripeSubscription, StripeConfig
@@ -872,6 +976,42 @@ try:
 except Exception:
     pass
 
+# --- sessions.discount_* マイグレーション ---
+try:
+    with engine.connect() as conn:
+        from sqlalchemy import text, inspect as sa_inspect_disc
+        cols_s = [c["name"] for c in sa_inspect_disc(engine).get_columns("sessions")]
+        for col, dtype, default in [
+            ("discount_label", "VARCHAR", "''"),
+            ("discount_type", "VARCHAR", "''"),
+            ("discount_value", "FLOAT", "0.0"),
+        ]:
+            if col not in cols_s:
+                conn.execute(text(f"ALTER TABLE sessions ADD COLUMN {col} {dtype} DEFAULT {default}"))
+                conn.commit()
+                print(f"[migrate] sessions.{col} added")
+except Exception:
+    pass
+
+# --- pricing_configs.set_minutes / extend_unit マイグレーション ---
+try:
+    with engine.connect() as conn:
+        from sqlalchemy import text, inspect as sa_inspect2
+        try:
+            cols_pc = [c["name"] for c in sa_inspect2(engine).get_columns("pricing_configs")]
+            if "set_minutes" not in cols_pc:
+                conn.execute(text("ALTER TABLE pricing_configs ADD COLUMN set_minutes INTEGER DEFAULT 60"))
+                conn.commit()
+                print("[migrate] pricing_configs.set_minutes added")
+            if "extend_unit" not in cols_pc:
+                conn.execute(text("ALTER TABLE pricing_configs ADD COLUMN extend_unit INTEGER DEFAULT 30"))
+                conn.commit()
+                print("[migrate] pricing_configs.extend_unit added")
+        except Exception:
+            pass
+except Exception:
+    pass
+
 # ---------- 会計計算 ----------
 def compute_bill(db, s: Session) -> Dict:
     # 料金ルールエンジンから設定を取得
@@ -907,7 +1047,39 @@ def compute_bill(db, s: Session) -> Dict:
         vip_fee      = config.vip_seat_fee or 0
 
     order_subtotal = sum(o.unit_price * o.qty for o in s.orders)
-    subtotal = time_amount + order_subtotal + table_charge + vip_fee
+
+    # 割引計算
+    discount_amount = 0.0
+    discount_label = s.discount_label or ""
+    discount_type = s.discount_type or ""
+    if discount_type == "set_override" and s.discount_value > 0:
+        # セット料金を指定額に上書き（差額が割引）
+        original_set = set_amount
+        overridden = s.discount_value * s.guest_count
+        discount_amount = max(0, original_set - overridden)
+    elif discount_type == "free_drink" and s.discount_value > 0:
+        # ドリンク○杯分を無料（安い順から適用）
+        drink_orders = sorted(
+            [o for o in s.orders if o.item and o.item.category == "drink"],
+            key=lambda o: o.unit_price
+        )
+        free_left = int(s.discount_value)
+        for o in drink_orders:
+            take = min(free_left, o.qty)
+            discount_amount += o.unit_price * take
+            free_left -= take
+            if free_left <= 0:
+                break
+    elif discount_type == "rate" and s.discount_value > 0:
+        # 小計から○%引き
+        pre_disc = time_amount + order_subtotal + table_charge + vip_fee
+        discount_amount = pre_disc * min(s.discount_value, 1.0)
+    elif discount_type == "fixed" and s.discount_value > 0:
+        # 固定額引き
+        discount_amount = s.discount_value
+
+    subtotal = time_amount + order_subtotal + table_charge + vip_fee - discount_amount
+    subtotal = max(0, subtotal)
 
     # 深夜加算
     try:
@@ -954,6 +1126,9 @@ def compute_bill(db, s: Session) -> Dict:
             for o in s.orders
         ],
         "order_subtotal": order_subtotal,
+        "discount_label": discount_label,
+        "discount_type": discount_type,
+        "discount_amount": float(discount_amount),
         "subtotal": subtotal,
         "service_fee": service_fee,
         "tax": tax,
@@ -1358,6 +1533,40 @@ def cancel_douhan(session_id: int, x_role: Optional[Role] = Header(None, alias="
     finally:
         db.close()
 
+@app.post("/sessions/{session_id}/discount")
+def apply_discount(session_id: int, payload: dict, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """セッションに割引を適用"""
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    db = SessionLocal()
+    try:
+        s = db.get(Session, session_id)
+        if not s or s.status != "open":
+            raise HTTPException(404, "Session not found or closed")
+        s.discount_label = payload.get("label", "")
+        s.discount_type = payload.get("disc_type", "")
+        s.discount_value = float(payload.get("value", 0))
+        db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
+@app.delete("/sessions/{session_id}/discount")
+def remove_discount(session_id: int, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """セッションの割引を解除"""
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    db = SessionLocal()
+    try:
+        s = db.get(Session, session_id)
+        if not s or s.status != "open":
+            raise HTTPException(404, "Session not found or closed")
+        s.discount_label = ""
+        s.discount_type = ""
+        s.discount_value = 0.0
+        db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
 @app.post("/sessions/{session_id}/orders/cancel")
 def cancel_order(session_id: int, payload: OrderIn, x_role: Optional[Role] = Header(None, alias="X-Role")):
     """
@@ -1699,6 +1908,7 @@ select,input{font-size:16px;padding:8px 10px;border-radius:10px;border:1px solid
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .kv{display:flex;justify-content:space-between;gap:8px;margin:6px 0}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.mono.discount{color:#4ade80}
 .muted{color:var(--muted)}
 hr{border:0;border-top:1px solid var(--line);margin:10px 0}
 #toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:60}
@@ -1846,19 +2056,19 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
 <div class="nav-overlay" id="navOverlay" onclick="toggleNavDrawer()"></div>
 <div class="nav-drawer" id="navDrawer">
   <button class="nav-close" onclick="toggleNavDrawer()">✕</button>
-  <a href="/ui/management" style="color:#f59e0b">📊 分析</a>
-  <a href="/ui/closing" style="color:#22c55e">📋 締め</a>
-  <a href="/ui/customers" style="color:#a855f7">👥 顧客台帳</a>
-  <a href="/ui/bottles" style="color:#ec4899">🍾 ボトルキープ</a>
-  <a href="/ui/tabs" style="color:#ef4444">📝 伝票</a>
-  <a href="/ui/pricing" style="color:#0ea5e9">💰 料金</a>
-  <a href="/ui/salary" style="color:#0ea5e9">💵 給与</a>
-  <a href="/ui/backup" style="color:#64748b">💾 DB</a>
-  <a href="/ui/audit" style="color:#64748b">🔍 監査</a>
+  <a href="/ui/management" style="color:#f59e0b" class="admin-link">📊 分析</a>
+  <a href="/ui/closing" style="color:#22c55e" class="admin-link">📋 締め</a>
+  <a href="/ui/customers" style="color:#a855f7" class="admin-link">👥 顧客台帳</a>
+  <a href="/ui/bottles" style="color:#ec4899" class="admin-link">🍾 ボトルキープ</a>
+  <a href="/ui/tabs" style="color:#ef4444" class="admin-link">📝 伝票</a>
+  <a href="/ui/pricing" style="color:#0ea5e9" class="admin-link">💰 料金</a>
+  <a href="/ui/salary" style="color:#0ea5e9" class="admin-link">💵 給与</a>
+  <a href="/ui/backup" style="color:#64748b" class="admin-link">💾 DB</a>
+  <a href="/ui/audit" style="color:#64748b" class="admin-link">🔍 監査</a>
   <a href="/ui/weather" style="color:#0ea5e9">🌤 天気</a>
-  <a href="/ui/mail" style="color:#f59e0b">📧 メール</a>
+  <a href="/ui/mail" style="color:#f59e0b" class="admin-link">📧 メール</a>
   <a href="/ui/attendance" style="color:#22c55e">🕐 出退勤</a>
-  <a href="/ui/subscription" style="color:#0ea5e9">💳 サブスク</a>
+  <a href="/ui/subscription" style="color:#0ea5e9" class="admin-link">💳 サブスク</a>
 </div>
 
 <!-- iPad用フロア/操作タブ -->
@@ -1931,6 +2141,9 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
               <button class="bigbtn" id="btnChangeStart" style="text-align:center;font-size:12px;background:#1a2744;border-color:#3b82f6;color:#93c5fd">時間変更</button>
               <button class="bigbtn" id="btnDouhan" style="text-align:center;font-size:12px;background:#4a1942;border-color:#e879f9;color:#f0abfc;font-weight:700">同伴</button>
+              <button class="bigbtn" id="btnDiscount" style="text-align:center;font-size:12px;background:#14352a;border-color:#4ade80;color:#4ade80;font-weight:700">割引</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:8px">
               <button class="bigbtn" id="btnCancelCheckin" style="text-align:center;font-size:12px;color:#fca5a5;border-color:#7f1d1d">入店取消</button>
             </div>
             <hr>
@@ -2005,6 +2218,23 @@ if (!sessionStorage.getItem('pos_auth')) {
   window.location.href = '/';
 }
 
+/* ====== ロール制御（トークンベース） ====== */
+(function(){
+  const tokenRole = sessionStorage.getItem('pos_role') || 'owner';
+  const sel = document.getElementById('role');
+  if (sel) {
+    if (tokenRole === 'owner') {
+      // ownerはロール切替可能
+      sel.value = 'owner';
+    } else {
+      // staff等はロール固定・変更不可
+      sel.value = tokenRole;
+      sel.disabled = true;
+      sel.title = 'このアカウントではロール変更できません';
+    }
+  }
+})();
+
 /* ====== ハンバーガーメニュー & iPad切替 ====== */
 function toggleNavDrawer(){
   document.getElementById('navDrawer').classList.toggle('open');
@@ -2065,7 +2295,13 @@ const store = ()=> parseInt($('storeId').value||'1',10);
 function updateAdminNav(){
   const nav=$('adminNav');
   if(!nav)return;
-  const r=role();
+  const tokenRole = sessionStorage.getItem('pos_role')||'owner';
+  const r = role();
+  // staffトークンの場合は管理ナビを常に非表示
+  if(tokenRole==='staff'){
+    nav.style.display='none';
+    return;
+  }
   nav.style.display=(r==='owner'||r==='manager')?'flex':'none';
 }
 document.addEventListener('DOMContentLoaded',()=>{
@@ -2077,6 +2313,14 @@ document.addEventListener('DOMContentLoaded',()=>{
     const btns=$('tableEditBtns');
     if(btns) btns.style.display=et.checked?'inline':'none';
   });
+  /* staffトークンは管理機能を非表示 */
+  const tokenRole = sessionStorage.getItem('pos_role')||'owner';
+  if(tokenRole==='staff'){
+    const editLabel = et?.closest('label');
+    if(editLabel) editLabel.style.display='none';
+    /* ナビドロワーの管理リンクも非表示 */
+    document.querySelectorAll('.admin-link').forEach(a=>a.style.display='none');
+  }
 });
 
 let selectedTableId = null;
@@ -2086,6 +2330,15 @@ let loops = { tick:null, bill:null, sales:null, floor:null, floorTick:null };
 
 const floorModel = {tables:[], tableEls:{}, sessionByTable:{}, billBySession:{}};
 const qtyState = { drink:{}, bottle:{}, food:{} }; // itemId: qty（0スタート）
+
+/* 店舗セット時間設定（起動時に取得） */
+let storeTimeConfig = { set_minutes: 60, extend_unit: 30 };
+async function loadStoreTimeConfig(){
+  try {
+    const r = await api(`/settings/store-time/${store()}`);
+    if(r) storeTimeConfig = r;
+  } catch(e){ /* デフォルト値を使用 */ }
+}
 
 /* タブ */
 document.addEventListener('click', (e)=>{
@@ -2337,7 +2590,7 @@ async function checkin(){
   }
   if (!selectedTableId) throw new Error('テーブルを選択してください');
   const gc=parseInt($('guestCount')?.value||'1',10)||1;
-  const s = await api('/sessions',{method:'POST', body:{store_id:store(), table_id:selectedTableId, guest_count:gc, set_minutes:60, extend_unit:30}});
+  const s = await api('/sessions',{method:'POST', body:{store_id:store(), table_id:selectedTableId, guest_count:gc, set_minutes:storeTimeConfig.set_minutes, extend_unit:storeTimeConfig.extend_unit}});
   currentSessionId=s.id; $('selSess').textContent=s.id;
   autoExtendBySession[s.id]=false; reflectAutoExtendBtn();
   toast('入店しました'); await refreshBill(); await loadFloor(); refreshSales(); startLoops();
@@ -2462,6 +2715,51 @@ async function recordDouhan(){
   }
 }
 
+/* 割引適用 */
+let _discountRules = [];
+async function loadDiscountRules(){
+  try{ _discountRules = await api(`/settings/pricing/${store()}/discounts`)||[]; }catch{}
+}
+async function applyDiscount(){
+  if(!currentSessionId) return toast('テーブルを選択してください','err');
+  if(!_discountRules.length) await loadDiscountRules();
+  const active = _discountRules.filter(d=>d.is_active);
+  if(!active.length) return toast('割引ルールが登録されていません\n料金設定から追加してください','err');
+
+  // 現在の割引状態を確認
+  const hasDisc = currentBill && currentBill.discount_amount > 0;
+  const typeLabels = {fixed:'固定値引き', rate:'割引率', set_override:'セット料金変更', free_drink:'ドリンク無料'};
+  const options = active.map((d,i)=>{
+    let desc = d.label || '割引';
+    if(d.disc_type==='fixed') desc += ` (¥${d.value.toLocaleString()}引き)`;
+    else if(d.disc_type==='rate') desc += ` (${Math.round(d.value*100)}%OFF)`;
+    else if(d.disc_type==='set_override') desc += ` (セット¥${d.value.toLocaleString()})`;
+    else if(d.disc_type==='free_drink') desc += ` (${d.value}杯無料)`;
+    return `${i+1}: ${desc}`;
+  }).join('\n');
+
+  const msg = hasDisc
+    ? `現在「${currentBill.discount_label}」適用中\n\n0: 割引解除\n${options}\n\n番号を入力:`
+    : `割引を選択:\n\n${options}\n\n番号を入力:`;
+  const input = prompt(msg);
+  if(input===null) return;
+  const idx = parseInt(input,10);
+
+  if(idx===0 && hasDisc){
+    try{
+      await api(`/sessions/${currentSessionId}/discount`,{method:'DELETE'});
+      toast('割引を解除しました'); await refreshBill(); await loadFloor(); refreshSales();
+    }catch(e){ toast('割引解除エラー',e.message,'err'); }
+    return;
+  }
+  const disc = active[idx-1];
+  if(!disc) return toast('正しい番号を入力してください','err');
+  try{
+    await api(`/sessions/${currentSessionId}/discount`,{method:'POST',body:{label:disc.label,disc_type:disc.disc_type,value:disc.value}});
+    toast(`割引適用: ${disc.label}`); await refreshBill(); await loadFloor(); refreshSales();
+  }catch(e){ toast('割引適用エラー',e.message,'err'); }
+}
+
 /* 明細＆サイドタイマー */
 async function refreshBill(){
   if (!currentSessionId) return;
@@ -2523,6 +2821,7 @@ function renderBill(b){
   if (b.table_charge > 0) lines.push(row('お通し/TC', toYen(b.table_charge)));
   if (b.vip_fee > 0)      lines.push(row('VIP席料', toYen(b.vip_fee)));
   if (b.night_surcharge > 0) lines.push(row('深夜加算', toYen(b.night_surcharge)));
+  if (b.discount_amount > 0) lines.push(row(`割引（${b.discount_label||''}）`, '-'+toYen(b.discount_amount), 'discount'));
   lines.push(`<hr>`);
   lines.push(row('小計', toYen(b.subtotal)));
   if(b.service_fee) lines.push(row('SC', toYen(b.service_fee)));
@@ -2611,6 +2910,7 @@ async function initUI(){
   $('btnMoveTable').addEventListener('click', ()=>moveTable().catch(e=>toast(e.message,'err')));
   $('btnChangeStart').addEventListener('click', ()=>changeStartTime().catch(e=>toast(e.message,'err')));
   $('btnDouhan').addEventListener('click', ()=>recordDouhan().catch(e=>toast(e.message,'err')));
+  $('btnDiscount').addEventListener('click', ()=>applyDiscount().catch(e=>toast(e.message,'err')));
 
   // 支払い（3方法）
   $('btnPayCash').addEventListener('click', ()=>payMethod('cash').catch(e=>toast(e.message,'err')));
@@ -2688,6 +2988,7 @@ async function initUI(){
   $('applyBottle').addEventListener('click', ()=>applyCategory('bottle').catch(e=>toast(e.message,'err')));
   $('applyFood').addEventListener('click', ()=>applyCategory('food').catch(e=>toast(e.message,'err')));
 
+  await loadStoreTimeConfig();
   await loadFloor();
   await loadItems();
   await loadCasts();
