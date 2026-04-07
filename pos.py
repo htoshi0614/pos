@@ -588,7 +588,7 @@ _PUBLIC_PATHS = {"/", "/auth/vendor-login", "/signup", "/ws", "/docs", "/openapi
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
     # 公開パス・UIページ・静的ファイルはスキップ
-    if path in _PUBLIC_PATHS or path.startswith("/ui"):
+    if path in _PUBLIC_PATHS or path.startswith("/ui") or path.startswith("/lp") or path == "/api/demo-request":
         return await call_next(request)
     # APIはトークン検証
     token = request.cookies.get("pos_token") or request.headers.get("X-Token", "")
@@ -1851,6 +1851,11 @@ try:
     app.include_router(_mail_router)
 except Exception as e:
     print(f"[warn] point_mail router: {e}")
+try:
+    from landing import router as _landing_router, DemoRequest
+    app.include_router(_landing_router)
+except Exception as e:
+    print(f"[warn] landing router: {e}")
 
 # ======================= UI (/ui) 完全版（取消＆数量管理つき） =======================
 from fastapi.responses import HTMLResponse
