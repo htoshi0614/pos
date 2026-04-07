@@ -21,67 +21,12 @@ from db_shared import Base, engine, SessionLocal
 app = FastAPI(title="Cabaret POS Full")
 
 # ---------- セキュリティ ----------
-# パスワードファイル（初回起動時に自動生成）
-import string as _string
-_CRED_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".pos_credentials")
-
-def _generate_password(length: int = 8) -> str:
-    """英数字のみのランダムパスワード（IME変換の誤入力防止）"""
-    chars = _string.ascii_letters + _string.digits
-    return ''.join(secrets.choice(chars) for _ in range(length))
-
-def _load_or_create_credentials() -> dict:
-    """パスワードをファイルから読み込み。なければ自動生成して保存"""
-    creds = {}
-    if os.path.exists(_CRED_FILE):
-        try:
-            with open(_CRED_FILE, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if "=" in line and not line.startswith("#"):
-                        k, v = line.split("=", 1)
-                        creds[k.strip()] = v.strip()
-        except Exception:
-            pass
-    # 環境変数で上書き可能
-    owner_pw = os.environ.get("POS_OWNER_PASSWORD") or creds.get("OWNER_PASSWORD", "")
-    staff_pw = os.environ.get("POS_STAFF_PASSWORD") or creds.get("STAFF_PASSWORD", "")
-    # 未設定なら自動生成
-    changed = False
-    if not owner_pw:
-        owner_pw = _generate_password(8)
-        changed = True
-    if not staff_pw:
-        staff_pw = _generate_password(6)
-        changed = True
-    if changed or not os.path.exists(_CRED_FILE):
-        try:
-            with open(_CRED_FILE, "w", encoding="utf-8") as f:
-                f.write("# POS Start ログインパスワード（自動生成）\n")
-                f.write("# このファイルを削除すると次回起動時に再生成されます\n")
-                f.write(f"OWNER_PASSWORD={owner_pw}\n")
-                f.write(f"STAFF_PASSWORD={staff_pw}\n")
-            print(f"\n{'='*50}")
-            print(f"  POS Start パスワード（初回自動生成）")
-            print(f"  オーナー用: {owner_pw}")
-            print(f"  スタッフ用: {staff_pw}")
-            print(f"  ※ファイル: {_CRED_FILE}")
-            print(f"{'='*50}\n")
-        except Exception as e:
-            print(f"[WARN] パスワードファイル保存失敗: {e}")
-    return {"owner": owner_pw, "staff": staff_pw}
-
-_PASSWORDS = _load_or_create_credentials()
-
-def _hash_pw(pw: str) -> str:
-    return hashlib.sha256(("pos_salt_v1:" + pw).encode()).hexdigest()
+_FIXED_PASSWORD = "posstart2024"
 
 def _verify_pw_role(pw: str) -> Optional[str]:
     """パスワードを検証し、一致したロールを返す（不一致はNone）"""
-    if pw == _PASSWORDS["owner"]:
+    if pw == _FIXED_PASSWORD:
         return "owner"
-    if pw == _PASSWORDS["staff"]:
-        return "staff"
     return None
 
 # リクエストごとのトークンロール（ContextVar）
@@ -141,35 +86,6 @@ def vendor_login(payload: dict, request: Request):
     _record_attempt(ip)
     remaining = MAX_ATTEMPTS - len(_login_attempts.get(ip, []))
     raise HTTPException(401, f"パスワードが正しくありません（残り{remaining}回）")
-
-@app.get("/auth/passwords")
-def get_passwords():
-    """現在のパスワードを表示（ownerのみ — ミドルウェアでトークン認証済み）"""
-    token_role = _current_token_role.get("")
-    if token_role != "owner":
-        raise HTTPException(403, "オーナーのみ閲覧可能です")
-    return {"owner": _PASSWORDS["owner"], "staff": _PASSWORDS["staff"]}
-
-@app.post("/auth/passwords/regenerate")
-def regenerate_passwords():
-    """パスワードを再生成（ownerのみ）"""
-    global _PASSWORDS
-    token_role = _current_token_role.get("")
-    if token_role != "owner":
-        raise HTTPException(403, "オーナーのみ変更可能です")
-    _PASSWORDS["owner"] = _generate_password(8)
-    _PASSWORDS["staff"] = _generate_password(6)
-    try:
-        with open(_CRED_FILE, "w", encoding="utf-8") as f:
-            f.write("# POS Start ログインパスワード（自動生成）\n")
-            f.write("# このファイルを削除すると次回起動時に再生成されます\n")
-            f.write(f"OWNER_PASSWORD={_PASSWORDS['owner']}\n")
-            f.write(f"STAFF_PASSWORD={_PASSWORDS['staff']}\n")
-    except Exception:
-        pass
-    # 既存トークンを全て無効化（再ログインが必要）
-    _active_tokens.clear()
-    return {"ok": True, "owner": _PASSWORDS["owner"], "staff": _PASSWORDS["staff"]}
 
 # ---------- 申し込みページ (/signup) ----------
 @app.get("/signup", response_class=HTMLResponse)
@@ -2069,6 +1985,7 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
   <a href="/ui/mail" style="color:#f59e0b" class="admin-link">📧 メール</a>
   <a href="/ui/attendance" style="color:#22c55e">🕐 出退勤</a>
   <a href="/ui/subscription" style="color:#0ea5e9" class="admin-link">💳 サブスク</a>
+
 </div>
 
 <!-- iPad用フロア/操作タブ -->
