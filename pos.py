@@ -496,6 +496,14 @@ class ConnectionManager:
 
 ws_manager = ConnectionManager()
 
+# メインの asyncio loop を保持（sync ハンドラからの broadcast 用）
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+@app.on_event("startup")
+async def _capture_main_loop():
+    global _main_loop
+    _main_loop = asyncio.get_running_loop()
+
 async def notify_clients(event: str, data: dict = None):
     """全端末にイベントを通知"""
     try:
@@ -504,12 +512,25 @@ async def notify_clients(event: str, data: dict = None):
         pass
 
 def _safe_notify(event: str, data: dict = None):
-    """同期関数からWebSocket通知を安全に発火（スレッドセーフ）"""
+    """同期関数からWebSocket通知を安全に発火（スレッドセーフ）
+
+    FastAPI の sync 'def' ハンドラは worker thread で実行され、その thread には
+    running loop が存在しないため `asyncio.get_running_loop()` は RuntimeError を投げる。
+    起動時に保持したメインループに `run_coroutine_threadsafe` で送る。
+    """
+    # まず running loop を試す（async ハンドラから呼ばれた場合）
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(notify_clients(event, data))
+        return
     except RuntimeError:
-        pass  # イベントループなし（ワーカースレッド）→スキップ
+        pass
+    # worker thread から → メインループへスレッドセーフに投げる
+    if _main_loop is not None and _main_loop.is_running():
+        try:
+            asyncio.run_coroutine_threadsafe(notify_clients(event, data), _main_loop)
+        except Exception:
+            pass
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
@@ -1600,7 +1621,7 @@ def cancel_order(session_id: int, payload: OrderIn, x_role: Optional[Role] = Hea
 # ---------- 出退勤API ----------
 @app.post("/attendance/clock-in")
 def clock_in(payload: dict, x_role: Optional[Role] = Header(None, alias="X-Role")):
-    require_role(x_role, ["owner","manager","cashier","staff"])
+    require_role(x_role, ["owner"])
     store_id = payload.get("store_id")
     cast_id = payload.get("cast_id")
     if not store_id or not cast_id:
@@ -1621,7 +1642,7 @@ def clock_in(payload: dict, x_role: Optional[Role] = Header(None, alias="X-Role"
 
 @app.post("/attendance/clock-out")
 def clock_out(payload: dict, x_role: Optional[Role] = Header(None, alias="X-Role")):
-    require_role(x_role, ["owner","manager","cashier","staff"])
+    require_role(x_role, ["owner"])
     store_id = payload.get("store_id")
     cast_id = payload.get("cast_id")
     if not store_id or not cast_id:
@@ -1641,19 +1662,23 @@ def clock_out(payload: dict, x_role: Optional[Role] = Header(None, alias="X-Role
 
 @app.get("/attendance/status")
 def attendance_status(store_id: int, x_role: Optional[Role] = Header(None, alias="X-Role")):
-    require_role(x_role, ["owner","manager","cashier","staff"])
+    require_role(x_role, ["owner"])
     db = SessionLocal()
     try:
+        from cast_salary import CastSalaryConfig
         casts = db.query(Cast).filter_by(store_id=store_id, is_active=True).all()
+        cfgs = {cfg.cast_id: cfg for cfg in db.query(CastSalaryConfig).filter_by(store_id=store_id).all()}
         result = []
         for c in casts:
             a = db.query(Attendance).filter_by(
                 store_id=store_id, person_type="cast", person_id=c.id, clock_out=None
             ).first()
+            cfg = cfgs.get(c.id)
             result.append({
                 "cast_id": c.id, "cast_name": c.name,
                 "clocked_in": a is not None,
-                "clock_in_time": a.clock_in.isoformat() if a else None
+                "clock_in_time": a.clock_in.isoformat() if a else None,
+                "hourly_rate": float(cfg.hourly_rate) if cfg else 0.0,
             })
         return result
     finally:
@@ -2145,7 +2170,7 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
     <a href="/ui/audit" target="_blank" style="color:#64748b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #64748b44;text-decoration:none">監査</a>
     <a href="/ui/weather" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">天気</a>
     <a href="/ui/mail" target="_blank" style="color:#f59e0b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #f59e0b44;text-decoration:none">メール</a>
-    <a href="/ui/attendance" target="_blank" style="color:#22c55e;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #22c55e44;text-decoration:none;font-weight:700">出退勤</a>
+    <a href="/ui/attendance" target="_blank" class="admin-link" style="color:#22c55e;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #22c55e44;text-decoration:none;font-weight:700">出退勤</a>
     <a href="/ui/subscription" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">サブスク</a>
   </div>
   <div class="muted" style="margin-left:auto;white-space:nowrap;display:flex;align-items:center;gap:8px">
@@ -2171,7 +2196,7 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
   <a href="/ui/audit" style="color:#64748b" class="admin-link">🔍 監査</a>
   <a href="/ui/weather" style="color:#0ea5e9">🌤 天気</a>
   <a href="/ui/mail" style="color:#f59e0b" class="admin-link">📧 メール</a>
-  <a href="/ui/attendance" style="color:#22c55e">🕐 出退勤</a>
+  <a href="/ui/attendance" style="color:#22c55e" class="admin-link">🕐 出退勤</a>
   <a href="/ui/subscription" style="color:#0ea5e9" class="admin-link">💳 サブスク</a>
 
 </div>
@@ -3206,6 +3231,13 @@ def ui_attendance():
     return HTMLResponse(r"""<!doctype html><html lang="ja"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>出退勤 - Girls Bar POS</title>
+<script>
+// 早期ガード: オーナー以外はアクセス不可
+if(sessionStorage.getItem('pos_role')!=='owner'){
+  alert('この画面はオーナー専用です');
+  window.location.href='/ui';
+}
+</script>
 <style>
 :root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--accent:#0ea5e9;--green:#22c55e;--red:#ef4444}
 *{box-sizing:border-box;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
@@ -3226,6 +3258,16 @@ header h1{margin:0;font-size:18px}
 .cast-card.out{border-color:var(--line)}
 .cast-card.out .status{background:#1e1b2e;color:var(--muted)}
 .cast-card .time{font-size:12px;color:var(--muted);margin-top:6px}
+.cast-card .elapsed{font-size:13px;color:#fcd34d;margin-top:4px;font-family:ui-monospace,monospace}
+.cast-card .wage{font-size:18px;font-weight:800;color:#86efac;margin-top:4px;font-family:ui-monospace,monospace}
+.summary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px}
+.summary .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.summary .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.summary .val{font-size:22px;font-weight:800;font-family:ui-monospace,monospace}
+.summary .val.sales{color:#22c55e}
+.summary .val.wages{color:#fcd34d}
+.summary .sub{font-size:11px;color:var(--muted);margin-top:4px}
+@media(max-width:500px){.summary{grid-template-columns:1fr}.summary .val{font-size:18px}}
 .toast{position:fixed;bottom:20px;right:20px;padding:14px 20px;border-radius:12px;font-size:15px;font-weight:700;z-index:100;animation:slide .2s ease-out}
 .toast.ok{background:#14532d;border:1px solid var(--green);color:#86efac}
 .toast.err{background:#450a0a;border:1px solid var(--red);color:#fca5a5}
@@ -3250,6 +3292,18 @@ header h1{margin:0;font-size:18px}
   <label style="display:flex;align-items:center;gap:6px;margin-bottom:16px;color:var(--muted);font-size:13px">
     店舗 <input id="storeId" type="number" value="1" style="width:70px;font-size:16px;padding:8px;border-radius:8px;border:1px solid #263244;background:#0a1220;color:var(--text)">
   </label>
+  <div class="summary">
+    <div class="box">
+      <div class="label">本日の売上（見込み）</div>
+      <div class="val sales" id="todaySales">¥-</div>
+      <div class="sub" id="salesSub">確定 ¥0 / 0組</div>
+    </div>
+    <div class="box">
+      <div class="label">出勤中の発生時給（合計）</div>
+      <div class="val wages" id="totalWages">¥0</div>
+      <div class="sub" id="wagesSub">出勤中 0名</div>
+    </div>
+  </div>
   <div class="cast-grid" id="castGrid"></div>
 </div>
 <script>
@@ -3270,6 +3324,7 @@ async function api(path,opt={}){
   const r=await fetch(path,o);
   if(r.status===401){sessionStorage.clear();window.location.href='/';return;}
   if(r.status===402){window.location.href='/ui/subscription';return;}
+  if(r.status===403){alert('オーナー権限が必要です');window.location.href='/ui';return;}
   if(!r.ok){const t=await r.text();throw new Error(t);}
   return r.json();
 }
@@ -3281,22 +3336,35 @@ function showToast(msg,type='ok'){
   setTimeout(()=>t.remove(),3000);
 }
 
+let castData=[];
+function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function fmtElapsed(ms){
+  const sec=Math.max(0,Math.floor(ms/1000));
+  const h=Math.floor(sec/3600), m=Math.floor((sec%3600)/60), ss=sec%60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+}
+function fmtYen(n){return '¥'+Math.round(n).toLocaleString();}
+
 async function loadStatus(){
   const s=$('storeId').value;
   try{
-    const data=await api(`/attendance/status?store_id=${s}`);
+    castData=await api(`/attendance/status?store_id=${s}`);
     const grid=$('castGrid'); grid.innerHTML='';
-    data.forEach(c=>{
+    castData.forEach(c=>{
       const card=document.createElement('div');
       card.className='cast-card '+(c.clocked_in?'in':'out');
+      card.dataset.castId=c.cast_id;
       let timeStr='';
       if(c.clocked_in && c.clock_in_time){
         const d=new Date(c.clock_in_time+'Z');
         timeStr=d.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})+' から勤務中';
       }
-      card.innerHTML=`<div class="name">${c.cast_name}</div>
+      const showWage = c.clocked_in && c.hourly_rate>0;
+      card.innerHTML=`<div class="name">${escapeHtml(c.cast_name)}</div>
         <div class="status">${c.clocked_in?'出勤中':'退勤'}</div>
-        ${timeStr?`<div class="time">${timeStr}</div>`:''}`;
+        ${timeStr?`<div class="time">${timeStr}</div>`:''}
+        ${c.clocked_in?'<div class="elapsed" data-elapsed>--:--:--</div>':''}
+        ${showWage?'<div class="wage" data-wage>¥0</div>':''}`;
       card.addEventListener('click',async()=>{
         if(c.clocked_in){
           if(!confirm(`${c.cast_name} を退勤にしますか？`)) return;
@@ -3312,19 +3380,78 @@ async function loadStatus(){
           }catch(e){showToast(e.message,'err');}
         }
         loadStatus();
+        loadSales();
       });
       grid.appendChild(card);
     });
+    tickWages();
   }catch(e){showToast(e.message,'err');}
 }
 
-$('storeId').addEventListener('change',loadStatus);
+function tickWages(){
+  const grid=$('castGrid');
+  let totalWages=0, activeCount=0;
+  const now=Date.now();
+  castData.forEach(c=>{
+    if(!c.clocked_in || !c.clock_in_time) return;
+    activeCount++;
+    const startMs=new Date(c.clock_in_time+'Z').getTime();
+    const elapsedMs=Math.max(0, now-startMs);
+    const hours=elapsedMs/3600000;
+    const wage=hours*(c.hourly_rate||0);
+    totalWages+=wage;
+    const card=grid.querySelector(`[data-cast-id="${c.cast_id}"]`);
+    if(card){
+      const eEl=card.querySelector('[data-elapsed]');
+      if(eEl) eEl.textContent=fmtElapsed(elapsedMs);
+      const wEl=card.querySelector('[data-wage]');
+      if(wEl) wEl.textContent=fmtYen(wage);
+    }
+  });
+  $('totalWages').textContent=fmtYen(totalWages);
+  $('wagesSub').textContent=`出勤中 ${activeCount}名`;
+}
+
+async function loadSales(){
+  const s=$('storeId').value;
+  try{
+    const d=await api(`/closing?store_id=${s}`);
+    $('todaySales').textContent=fmtYen(d.total_sales||0);
+    $('salesSub').textContent=`確定 ${fmtYen(d.confirmed_sales||0)} / ${d.closed_count||0}組確定・${d.open_count||0}組open`;
+  }catch{}
+}
+
+$('storeId').addEventListener('change',()=>{loadStatus();loadSales();});
 // オーナー限定リンクの表示
 if(sessionStorage.getItem('pos_role')==='owner'){
   $('manageLink').style.display='inline-block';
 }
 loadStatus();
-setInterval(loadStatus,30000);
+loadSales();
+setInterval(tickWages,1000);   // 1秒ごとに経過時間と発生時給を更新
+setInterval(loadStatus,30000); // 30秒ごとに出退勤状況を再取得（WS補完用）
+setInterval(loadSales,15000);  // 15秒ごとに売上を再取得（WS補完用）
+
+// WebSocket: フロア端末からの注文・入店・会計を即時反映
+let _ws=null;
+function connectWS(){
+  try{
+    const proto=location.protocol==='https:'?'wss:':'ws:';
+    _ws=new WebSocket(`${proto}//${location.host}/ws`);
+    _ws.onclose=()=>{ setTimeout(connectWS,3000); };
+    _ws.onerror=()=>{ try{_ws.close();}catch{} };
+    _ws.onmessage=(ev)=>{
+      try{
+        const msg=JSON.parse(ev.data);
+        // 売上に影響するイベント → 売上カードを即時更新
+        if(['order','cancel_order','payment','checkout','cancel_session','extend','checkin','guest_count','move_table','start_time','douhan','discount'].includes(msg.event)){
+          loadSales();
+        }
+      }catch{}
+    };
+  }catch{}
+}
+connectWS();
 </script></body></html>""")
 
 # ======================= 出退勤 編集UI（オーナー限定） =======================
