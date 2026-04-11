@@ -1659,6 +1659,116 @@ def attendance_status(store_id: int, x_role: Optional[Role] = Header(None, alias
     finally:
         db.close()
 
+# ---------- 出退勤記録の手動編集（オーナーのみ） ----------
+def _parse_jst_iso(s: str) -> datetime:
+    """ISO形式 (YYYY-MM-DDTHH:MM) を JST として解釈し、UTC naive datetime を返す"""
+    if not s:
+        raise HTTPException(400, "datetime required")
+    try:
+        # 末尾Zやタイムゾーンが含まれていればそのままfromisoformat
+        s_clean = s.rstrip("Z")
+        dt = datetime.fromisoformat(s_clean)
+    except ValueError:
+        raise HTTPException(400, f"invalid datetime: {s}")
+    jst = ZoneInfo("Asia/Tokyo")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=jst)
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+@app.get("/attendance/records")
+def attendance_records(store_id: int, year: int, month: int,
+                       x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """月次の出退勤記録一覧（オーナー限定・手動編集用）"""
+    require_role(x_role, ["owner"])
+    db = SessionLocal()
+    try:
+        jst = ZoneInfo("Asia/Tokyo")
+        rows = (db.query(Attendance)
+                .filter_by(store_id=store_id, person_type="cast")
+                .order_by(Attendance.clock_in.desc())
+                .all())
+        casts = {c.id: c.name for c in db.query(Cast).filter_by(store_id=store_id).all()}
+        result = []
+        for a in rows:
+            if not a.clock_in:
+                continue
+            ci_jst = a.clock_in.replace(tzinfo=timezone.utc).astimezone(jst)
+            if ci_jst.year != year or ci_jst.month != month:
+                continue
+            co_jst = a.clock_out.replace(tzinfo=timezone.utc).astimezone(jst) if a.clock_out else None
+            hours = (a.clock_out - a.clock_in).total_seconds() / 3600 if a.clock_out else None
+            result.append({
+                "id": a.id,
+                "cast_id": a.person_id,
+                "cast_name": casts.get(a.person_id, f"#{a.person_id}"),
+                "clock_in":  ci_jst.strftime("%Y-%m-%dT%H:%M"),
+                "clock_out": co_jst.strftime("%Y-%m-%dT%H:%M") if co_jst else None,
+                "hours": round(hours, 2) if hours is not None else None,
+            })
+        return result
+    finally:
+        db.close()
+
+@app.post("/attendance/records")
+def attendance_create(payload: dict,
+                       x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """打刻忘れの手動追加（オーナー限定）"""
+    require_role(x_role, ["owner"])
+    store_id = payload.get("store_id")
+    cast_id = payload.get("cast_id")
+    clock_in_str = payload.get("clock_in")
+    clock_out_str = payload.get("clock_out")
+    if not (store_id and cast_id and clock_in_str):
+        raise HTTPException(400, "store_id, cast_id, clock_in are required")
+    ci = _parse_jst_iso(clock_in_str)
+    co = _parse_jst_iso(clock_out_str) if clock_out_str else None
+    if co and co <= ci:
+        raise HTTPException(400, "退勤時刻は出勤時刻より後である必要があります")
+    db = SessionLocal()
+    try:
+        a = Attendance(store_id=store_id, person_type="cast", person_id=cast_id,
+                       clock_in=ci, clock_out=co)
+        db.add(a); db.commit(); db.refresh(a)
+        return {"ok": True, "id": a.id}
+    finally:
+        db.close()
+
+@app.patch("/attendance/records/{rec_id}")
+def attendance_update(rec_id: int, payload: dict,
+                       x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """既存記録の修正（オーナー限定）"""
+    require_role(x_role, ["owner"])
+    db = SessionLocal()
+    try:
+        a = db.get(Attendance, rec_id)
+        if not a:
+            raise HTTPException(404, "記録が見つかりません")
+        if "clock_in" in payload:
+            a.clock_in = _parse_jst_iso(payload["clock_in"])
+        if "clock_out" in payload:
+            a.clock_out = _parse_jst_iso(payload["clock_out"]) if payload["clock_out"] else None
+        if a.clock_out and a.clock_out <= a.clock_in:
+            raise HTTPException(400, "退勤時刻は出勤時刻より後である必要があります")
+        db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
+@app.delete("/attendance/records/{rec_id}")
+def attendance_delete(rec_id: int,
+                       x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """記録の削除（オーナー限定）"""
+    require_role(x_role, ["owner"])
+    db = SessionLocal()
+    try:
+        a = db.get(Attendance, rec_id)
+        if not a:
+            raise HTTPException(404, "記録が見つかりません")
+        db.delete(a); db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
 @app.get("/closing")
 def closing(store_id: int, x_role: Optional[Role] = Header(None, alias="X-Role")):
     # 全ロール閲覧可（必要に応じて絞ってOK）
@@ -3131,6 +3241,7 @@ header h1{margin:0;font-size:18px}
   <div class="nav" style="display:flex;gap:8px;margin-left:auto">
     <a href="/ui">← フロア</a>
     <a href="/ui/salary">給与</a>
+    <a href="/ui/attendance/manage" id="manageLink" style="display:none;border-color:#f59e0b;color:#fcd34d">📋 修正・追加</a>
   </div>
 </header>
 <div class="container">
@@ -3208,6 +3319,226 @@ async function loadStatus(){
 }
 
 $('storeId').addEventListener('change',loadStatus);
+// オーナー限定リンクの表示
+if(sessionStorage.getItem('pos_role')==='owner'){
+  $('manageLink').style.display='inline-block';
+}
 loadStatus();
 setInterval(loadStatus,30000);
+</script></body></html>""")
+
+# ======================= 出退勤 編集UI（オーナー限定） =======================
+@app.get("/ui/attendance/manage", response_class=HTMLResponse)
+def ui_attendance_manage():
+    return HTMLResponse(r"""<!doctype html><html lang="ja"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>出退勤 修正 - Girls Bar POS</title>
+<style>
+:root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--accent:#0ea5e9;--green:#22c55e;--red:#ef4444;--amber:#f59e0b}
+*{box-sizing:border-box;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
+body{margin:0;background:var(--bg);color:var(--text)}
+header{position:sticky;top:0;z-index:40;display:flex;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line);background:rgba(11,18,32,.95)}
+header h1{margin:0;font-size:17px}
+.nav a{color:var(--accent);text-decoration:none;font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid var(--line)}
+.container{max-width:1000px;margin:0 auto;padding:20px 16px}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:18px;padding:14px;background:var(--card);border:1px solid var(--line);border-radius:12px}
+.bar label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--muted)}
+.bar input,.bar select{font-size:14px;padding:7px 10px;border-radius:8px;border:1px solid #263244;background:#0a1220;color:var(--text)}
+.btn{cursor:pointer;font-size:13px;padding:8px 14px;border-radius:8px;border:1px solid #334155;background:#111827;color:var(--text)}
+.btn.solid{background:var(--accent);border-color:var(--accent);color:#001018;font-weight:700}
+.btn.green{background:var(--green);border-color:var(--green);color:#001018;font-weight:700}
+.btn.red{background:#7f1d1d;border-color:var(--red);color:#fca5a5}
+.btn.sm{font-size:11px;padding:5px 9px}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:13px}
+th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left}
+th{background:#111827;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+tr:last-child td{border-bottom:none}
+.empty{text-align:center;padding:40px;color:var(--muted)}
+.notice{background:#1a2030;border-left:3px solid var(--amber);padding:10px 14px;border-radius:8px;font-size:12px;color:var(--muted);margin-bottom:14px}
+.notice b{color:#fcd34d}
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center}
+.modal.show{display:flex}
+.modal-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px;max-width:420px;width:90%}
+.modal-card h3{margin:0 0 14px;font-size:16px}
+.modal-card label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+.modal-card input,.modal-card select{width:100%;padding:9px 12px;border-radius:8px;border:1px solid #263244;background:#0a1220;color:var(--text);font-size:14px}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+.toast{position:fixed;bottom:20px;right:20px;padding:12px 18px;border-radius:10px;font-size:14px;font-weight:700;z-index:200}
+.toast.ok{background:#14532d;border:1px solid var(--green);color:#86efac}
+.toast.err{background:#450a0a;border:1px solid var(--red);color:#fca5a5}
+</style></head><body>
+<header>
+  <h1>📋 出退勤 修正・追加（オーナー限定）</h1>
+  <div class="nav" style="display:flex;gap:8px;margin-left:auto">
+    <a href="/ui/attendance">← 打刻画面</a>
+    <a href="/ui/salary">給与</a>
+    <a href="/ui">フロア</a>
+  </div>
+</header>
+
+<div class="container">
+  <div class="notice">
+    <b>⚠ 打刻忘れの手動入力</b> — このページはオーナーのみアクセスできます。修正・追加した内容はすぐ給与計算に反映されます。
+  </div>
+
+  <div class="bar">
+    <label>店舗 <input id="storeId" type="number" value="1" style="width:80px"></label>
+    <label>年 <input id="year" type="number" style="width:90px"></label>
+    <label>月 <input id="month" type="number" min="1" max="12" style="width:70px"></label>
+    <button class="btn solid" onclick="loadRecords()">読み込み</button>
+    <button class="btn green" style="margin-left:auto" onclick="openAdd()">＋ 新規追加</button>
+  </div>
+
+  <div id="tableWrap"></div>
+</div>
+
+<!-- 追加・編集モーダル -->
+<div class="modal" id="modal">
+  <div class="modal-card">
+    <h3 id="modalTitle">出退勤を追加</h3>
+    <label>キャスト</label>
+    <select id="m_cast"></select>
+    <label>出勤日時</label>
+    <input id="m_in" type="datetime-local">
+    <label>退勤日時（未入力可）</label>
+    <input id="m_out" type="datetime-local">
+    <div class="modal-actions">
+      <button class="btn red" id="m_delete" onclick="doDelete()" style="margin-right:auto;display:none">削除</button>
+      <button class="btn" onclick="closeModal()">キャンセル</button>
+      <button class="btn solid" onclick="doSave()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let editId=null;
+let castList=[];
+
+async function api(path,opt={}){
+  const tk=sessionStorage.getItem('pos_token')||'';
+  const o={method:'GET',headers:{'Content-Type':'application/json','X-Role':'owner','X-Token':tk},...opt};
+  if(o.body&&typeof o.body!=='string') o.body=JSON.stringify(o.body);
+  const r=await fetch(path,o);
+  if(r.status===401){sessionStorage.clear();window.location.href='/';return;}
+  if(r.status===402){window.location.href='/ui/subscription';return;}
+  if(r.status===403){alert('オーナー権限が必要です');window.location.href='/ui/attendance';return;}
+  if(!r.ok){const t=await r.text();throw new Error(t);}
+  return r.json();
+}
+
+function toast(msg,type='ok'){
+  const el=document.createElement('div');
+  el.className='toast '+type; el.textContent=msg;
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(),2500);
+}
+
+function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+async function loadCasts(){
+  const s=$('storeId').value;
+  try{
+    castList=await api(`/casts?store_id=${s}`);
+    const sel=$('m_cast');
+    sel.innerHTML=castList.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  }catch(e){toast(e.message,'err');}
+}
+
+async function loadRecords(){
+  const s=$('storeId').value;
+  const y=$('year').value;
+  const m=$('month').value;
+  try{
+    const rows=await api(`/attendance/records?store_id=${s}&year=${y}&month=${m}`);
+    const wrap=$('tableWrap');
+    if(!rows.length){
+      wrap.innerHTML='<div class="empty">この月の記録はまだありません</div>';
+      return;
+    }
+    wrap.innerHTML=`<table>
+      <thead><tr><th>キャスト</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th></th></tr></thead>
+      <tbody>${rows.map(r=>`
+        <tr>
+          <td>${escapeHtml(r.cast_name)}</td>
+          <td>${r.clock_in.replace('T',' ')}</td>
+          <td>${r.clock_out?r.clock_out.replace('T',' '):'<span style="color:#fca5a5">未退勤</span>'}</td>
+          <td>${r.hours!==null?r.hours+' h':'—'}</td>
+          <td><button class="btn sm" onclick='openEdit(${JSON.stringify(r).replace(/'/g,"&#39;")})'>編集</button></td>
+        </tr>`).join('')}
+      </tbody></table>`;
+  }catch(e){toast(e.message,'err');}
+}
+
+function openAdd(){
+  editId=null;
+  $('modalTitle').textContent='出退勤を追加';
+  $('m_delete').style.display='none';
+  // 当月の今日にプリセット
+  const y=parseInt($('year').value), m=parseInt($('month').value);
+  const today=new Date();
+  const d=(today.getFullYear()===y && today.getMonth()+1===m)?today.getDate():1;
+  const pad=n=>String(n).padStart(2,'0');
+  $('m_in').value=`${y}-${pad(m)}-${pad(d)}T19:00`;
+  $('m_out').value=`${y}-${pad(m)}-${pad(d)}T23:00`;
+  $('modal').classList.add('show');
+}
+
+function openEdit(r){
+  editId=r.id;
+  $('modalTitle').textContent='出退勤を修正';
+  $('m_delete').style.display='';
+  $('m_cast').value=r.cast_id;
+  $('m_in').value=r.clock_in;
+  $('m_out').value=r.clock_out||'';
+  $('modal').classList.add('show');
+}
+
+function closeModal(){$('modal').classList.remove('show');}
+
+async function doSave(){
+  const cast_id=parseInt($('m_cast').value);
+  const clock_in=$('m_in').value;
+  const clock_out=$('m_out').value||null;
+  if(!clock_in){toast('出勤日時は必須です','err');return;}
+  try{
+    if(editId){
+      await api(`/attendance/records/${editId}`,{method:'PATCH',body:{clock_in,clock_out}});
+      toast('修正しました');
+    }else{
+      await api('/attendance/records',{method:'POST',body:{
+        store_id:parseInt($('storeId').value), cast_id, clock_in, clock_out
+      }});
+      toast('追加しました');
+    }
+    closeModal();
+    loadRecords();
+  }catch(e){toast(e.message,'err');}
+}
+
+async function doDelete(){
+  if(!editId) return;
+  if(!confirm('この記録を削除しますか？')) return;
+  try{
+    await api(`/attendance/records/${editId}`,{method:'DELETE'});
+    toast('削除しました');
+    closeModal();
+    loadRecords();
+  }catch(e){toast(e.message,'err');}
+}
+
+// 初期化
+(function init(){
+  // ロールチェック（フロント側でも早期ガード）
+  if(sessionStorage.getItem('pos_role')!=='owner'){
+    alert('このページはオーナー専用です');
+    window.location.href='/ui/attendance';
+    return;
+  }
+  const now=new Date();
+  $('year').value=now.getFullYear();
+  $('month').value=now.getMonth()+1;
+  loadCasts();
+  loadRecords();
+})();
 </script></body></html>""")
