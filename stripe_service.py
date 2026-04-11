@@ -124,6 +124,53 @@ def get_subscription(store_id: int,
     finally:
         db.close()
 
+# ─────────────────────────── 共通ヘルパー（killスイッチ用） ───────────────────────────
+
+ACTIVE_STATUSES = ("active", "trialing")
+
+def is_pos_locked(db) -> tuple[bool, str]:
+    """サブスク状態に基づきPOSをロックすべきか判定。
+    返り値: (ロックすべき, 理由)
+
+    判定ルール：
+    - サブスクが一度も作成されていない → ロックしない（新規導入の猶予）
+    - status が active/trialing → ロックしない
+    - status がそれ以外でも、current_period_end が未来（= 既払い期間内）→ ロックしない（猶予）
+    - 上記以外（期間終了済 or 期間情報なし） → ロック
+    """
+    sub = db.query(StripeSubscription).first()
+    if not sub:
+        return False, "no_subscription"
+    if sub.status in ACTIVE_STATUSES:
+        return False, sub.status
+    # 解約済み・支払い遅延でも、支払い済み期間が残っていれば使える
+    if sub.current_period_end and sub.current_period_end > datetime.utcnow():
+        return False, f"{sub.status or 'inactive'}_grace"
+    return True, sub.status or "inactive"
+
+@router.get("/stripe/status")
+def stripe_status(store_id: int = 1):
+    """サブスク状態（認証不要・middleware用）"""
+    db = SessionLocal()
+    try:
+        sub = db.query(StripeSubscription).filter_by(store_id=store_id).first()
+        if not sub:
+            sub = db.query(StripeSubscription).first()
+        if not sub:
+            return {"status": "none", "locked": False}
+        locked, reason = is_pos_locked(db)
+        in_grace = (not locked) and sub.status not in ACTIVE_STATUSES
+        return {
+            "status": sub.status or "inactive",
+            "locked": locked,
+            "in_grace": in_grace,
+            "current_period_end": sub.current_period_end.isoformat() if sub.current_period_end else None,
+            "cancel_at_end": bool(sub.cancel_at_end),
+            "plan_name": sub.plan_name or "",
+        }
+    finally:
+        db.close()
+
 @router.post("/subscription/create-checkout")
 def create_checkout_session(payload: CreateSessionIn,
                              x_role: Optional[str] = Header(None, alias="X-Role")):

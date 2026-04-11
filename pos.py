@@ -498,12 +498,55 @@ async def websocket_endpoint(ws: WebSocket):
         ws_manager.disconnect(ws)
 
 # ---------- API認証ミドルウェア ----------
-_PUBLIC_PATHS = {"/", "/auth/vendor-login", "/signup", "/ws", "/docs", "/openapi.json", "/favicon.ico"}
+_PUBLIC_PATHS = {"/", "/auth/vendor-login", "/signup", "/ws", "/docs", "/openapi.json", "/favicon.ico", "/stripe/webhook", "/stripe/status"}
+
+# サブスクが切れていてもアクセスを許可するパス（解約後も再契約できるように）
+_SUBSCRIPTION_BYPASS_PREFIXES = (
+    "/ui/subscription",
+    "/subscription/",
+    "/stripe-config/",
+    "/stripe/",
+    "/auth/",
+)
+_SUBSCRIPTION_BYPASS_PATHS = {"/", "/signup", "/favicon.ico", "/docs", "/openapi.json", "/ws"}
+
+def _is_subscription_bypass(path: str) -> bool:
+    if path in _SUBSCRIPTION_BYPASS_PATHS:
+        return True
+    return any(path.startswith(p) for p in _SUBSCRIPTION_BYPASS_PREFIXES)
+
+def _check_pos_locked() -> tuple[bool, str]:
+    """POSがサブスク切れでロックすべきか判定"""
+    try:
+        from stripe_service import is_pos_locked
+        db = SessionLocal()
+        try:
+            return is_pos_locked(db)
+        finally:
+            db.close()
+    except Exception:
+        return False, "check_failed"
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
-    # 公開パス・UIページ・静的ファイルはスキップ
+    # サブスク切れチェック（公開パス含めすべてに適用、ただしバイパス対象は素通り）
+    if not _is_subscription_bypass(path):
+        locked, reason = _check_pos_locked()
+        if locked:
+            # /ui/* へのアクセスはサブスク画面へリダイレクト
+            if path.startswith("/ui"):
+                return JSONResponse(
+                    status_code=307,
+                    content={"detail": "サブスクリプションが無効です"},
+                    headers={"Location": "/ui/subscription"},
+                )
+            # APIは 402 Payment Required
+            return JSONResponse(
+                {"detail": "サブスクリプションが無効です。お支払い情報をご確認ください。", "reason": reason, "locked": True},
+                status_code=402,
+            )
+    # 公開パス・UIページ・静的ファイルはトークン検証スキップ
     if path in _PUBLIC_PATHS or path.startswith("/ui"):
         return await call_next(request)
     # APIはトークン検証
@@ -1919,16 +1962,14 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
 </head>
 <body>
 
-<!-- サブスク未払い警告モーダル -->
-<div id="subModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;align-items:center;justify-content:center">
-<div style="background:#1a0e12;border:2px solid #ef4444;border-radius:16px;padding:28px;max-width:440px;text-align:center">
-  <div style="font-size:32px;margin-bottom:10px">⚠️</div>
-  <h2 style="margin:0 0 10px;color:#fca5a5">サブスクリプション未払い</h2>
-  <p style="color:#b0bec5;font-size:14px;margin:0 0 16px">ご利用を続けるにはサブスクリプションの設定が必要です。</p>
-  <div style="display:flex;gap:10px;justify-content:center">
-    <a href="/ui/subscription" class="btn solid" style="text-decoration:none;font-size:15px;padding:10px 20px">サブスク設定へ</a>
-    <button class="btn" onclick="document.getElementById('subModal').style.display='none'" style="font-size:15px;padding:10px 20px">後で</button>
-  </div>
+<!-- サブスク未払い警告モーダル（解約時はクローズ不可・再契約必須） -->
+<div id="subModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;align-items:center;justify-content:center">
+<div style="background:#1a0e12;border:2px solid #ef4444;border-radius:16px;padding:32px;max-width:480px;text-align:center;box-shadow:0 0 40px rgba(239,68,68,.3)">
+  <div style="font-size:48px;margin-bottom:12px">🔒</div>
+  <h2 style="margin:0 0 12px;color:#fca5a5;font-size:20px">POS Start はご利用いただけません</h2>
+  <p id="subModalMsg" style="color:#e5e7eb;font-size:14px;margin:0 0 8px;line-height:1.6">サブスクリプションが無効です。<br>引き続きご利用いただくには再契約が必要です。</p>
+  <p style="color:#94a3b8;font-size:12px;margin:0 0 20px">ご不明点はサポートまでお問い合わせください</p>
+  <a href="/ui/subscription" class="btn solid" style="text-decoration:none;font-size:15px;padding:12px 28px;display:inline-block">サブスクリプション設定へ</a>
 </div></div>
 
 <header>
@@ -2274,6 +2315,7 @@ async function api(path, opt={}) {
   if (o.body && typeof o.body !== 'string') o.body = JSON.stringify(o.body);
   const res = await fetch(path, o);
   if (res.status===401) { sessionStorage.clear(); window.location.href='/'; return; }
+  if (res.status===402) { window.location.href='/ui/subscription'; return; }
   if (!res.ok) { throw new Error(`${res.status} ${await res.text()}`); }
   const ct = res.headers.get('content-type')||'';
   return ct.includes('application/json') ? res.json() : res.text();
@@ -2921,13 +2963,21 @@ async function initUI(){
   refreshSales();
   connectWS();
 
-  // サブスク状態チェック（未払いなら警告）
+  // サブスク状態チェック（解約・未払いなら強制ロック画面）
   try{
-    const sub=await fetch('/stripe/status?store_id='+store(),{headers:{'X-Role':role()}});
+    const sub=await fetch('/stripe/status?store_id='+store());
     if(sub.ok){
       const sd=await sub.json();
-      if(sd.status&&sd.status!=='active'&&sd.status!=='trialing'){
+      if(sd.locked){
+        const msg=$('subModalMsg');
+        if(msg){
+          const labels={canceled:'解約済み',past_due:'お支払いが滞っています',inactive:'未加入',unpaid:'お支払いが確認できません'};
+          msg.innerHTML=`サブスクリプションが<b style="color:#fca5a5">${labels[sd.status]||sd.status}</b>です。<br>引き続きご利用いただくには再契約が必要です。`;
+        }
         $('subModal').style.display='flex';
+        // 操作を完全に無効化
+        document.body.style.pointerEvents='none';
+        $('subModal').style.pointerEvents='auto';
       }
     }
   }catch{}
@@ -3071,6 +3121,7 @@ async function api(path,opt={}){
   if(o.body&&typeof o.body!=='string') o.body=JSON.stringify(o.body);
   const r=await fetch(path,o);
   if(r.status===401){sessionStorage.clear();window.location.href='/';return;}
+  if(r.status===402){window.location.href='/ui/subscription';return;}
   if(!r.ok){const t=await r.text();throw new Error(t);}
   return r.json();
 }
