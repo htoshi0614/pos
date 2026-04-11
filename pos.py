@@ -269,13 +269,36 @@ function submitCard(){
     'クレジットカードでのお申し込みを受け付けました。\n確認メールをお送りしましたのでご確認ください。';
 }
 
-function submitBank(){
+async function submitBank(){
   if(!validate()) return;
-  document.getElementById('formArea').style.display='none';
-  const s=document.getElementById('successMsg');
-  s.style.display='block';
-  document.getElementById('successDetail').textContent=
-    '口座振込でのお申し込みを受け付けました。\n上記口座へのお振込をお願いいたします。確認後、アカウントを有効化いたします。';
+  const btn=document.querySelector('.bank-pay');
+  const err=document.getElementById('errorMsg');
+  btn.disabled=true; btn.textContent='送信中...';
+  try{
+    const r=await fetch('/signup/bank',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        shop_name: document.getElementById('shopName').value.trim(),
+        contact_name: document.getElementById('contactName').value.trim(),
+        contact_phone: document.getElementById('contactPhone').value.trim(),
+        contact_email: document.getElementById('contactEmail').value.trim(),
+      })
+    });
+    if(!r.ok){
+      const t=await r.text();
+      throw new Error(t);
+    }
+    document.getElementById('formArea').style.display='none';
+    const s=document.getElementById('successMsg');
+    s.style.display='block';
+    document.getElementById('successDetail').textContent=
+      '口座振込でのお申し込みを受け付けました。\n上記口座へのお振込をお願いいたします。\n入金確認後、1営業日以内にアカウントを有効化いたします。';
+  }catch(e){
+    err.textContent='送信に失敗しました: '+e.message;
+    err.style.display='block';
+    btn.disabled=false; btn.textContent='振込で申し込む';
+  }
 }
 
 // カード番号フォーマット
@@ -498,17 +521,19 @@ async def websocket_endpoint(ws: WebSocket):
         ws_manager.disconnect(ws)
 
 # ---------- API認証ミドルウェア ----------
-_PUBLIC_PATHS = {"/", "/auth/vendor-login", "/signup", "/ws", "/docs", "/openapi.json", "/favicon.ico", "/stripe/webhook", "/stripe/status"}
+_PUBLIC_PATHS = {"/", "/auth/vendor-login", "/signup", "/signup/bank", "/ws", "/docs", "/openapi.json", "/favicon.ico", "/stripe/webhook", "/stripe/status"}
 
 # サブスクが切れていてもアクセスを許可するパス（解約後も再契約できるように）
 _SUBSCRIPTION_BYPASS_PREFIXES = (
     "/ui/subscription",
+    "/ui/admin",
     "/subscription/",
     "/stripe-config/",
     "/stripe/",
     "/auth/",
+    "/admin/",
 )
-_SUBSCRIPTION_BYPASS_PATHS = {"/", "/signup", "/favicon.ico", "/docs", "/openapi.json", "/ws"}
+_SUBSCRIPTION_BYPASS_PATHS = {"/", "/signup", "/signup/bank", "/favicon.ico", "/docs", "/openapi.json", "/ws"}
 
 def _is_subscription_bypass(path: str) -> bool:
     if path in _SUBSCRIPTION_BYPASS_PATHS:
@@ -894,7 +919,7 @@ try:
     from pricing_engine import PricingConfig, TimeSlotRule, DiscountRule
     from cast_salary import CastSalaryConfig, DrinkBackRecord
     from weather_service import WeatherConfig, StaffSchedule
-    from stripe_service import StripeSubscription, StripeConfig
+    from stripe_service import StripeSubscription, StripeConfig, BankSignup
     from closing import Closing
     from bottle_keep import BottleKeep
     from customer_crm import CustomerProfile, VisitLog
@@ -903,6 +928,18 @@ try:
     Base.metadata.create_all(engine)
 except Exception as _ext_err:
     print(f"[warn] 拡張モジュール読み込み: {_ext_err}")
+
+# --- stripe_subscriptions.payment_method カラム追加マイグレーション ---
+try:
+    with engine.connect() as conn:
+        from sqlalchemy import text, inspect as sa_inspect_pm
+        cols_ss = [c["name"] for c in sa_inspect_pm(engine).get_columns("stripe_subscriptions")]
+        if "payment_method" not in cols_ss:
+            conn.execute(text("ALTER TABLE stripe_subscriptions ADD COLUMN payment_method VARCHAR DEFAULT 'card'"))
+            conn.commit()
+            print("[migrate] stripe_subscriptions.payment_method added")
+except Exception:
+    pass
 
 # --- orders.cast_id カラム追加マイグレーション ---
 try:
