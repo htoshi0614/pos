@@ -24,8 +24,24 @@ class StripeSubscription(Base):
     status              = Column(String, default="inactive")  # active/inactive/canceled/past_due
     current_period_end  = Column(DateTime, nullable=True)
     cancel_at_end       = Column(Boolean, default=False)
+    payment_method      = Column(String, default="card")   # card / bank / manual
     metadata_json       = Column(Text, default="{}")
     updated_at          = Column(DateTime, default=datetime.utcnow)
+
+class BankSignup(Base):
+    """口座振込の申し込み受付（入金確認待ち）"""
+    __tablename__ = "bank_signups"
+    id            = Column(Integer, primary_key=True)
+    shop_name     = Column(String, default="")
+    contact_name  = Column(String, default="")
+    contact_phone = Column(String, default="")
+    contact_email = Column(String, default="")
+    status        = Column(String, default="pending")  # pending / paid / canceled
+    store_id      = Column(Integer, nullable=True)     # 有効化時に発行
+    period_end    = Column(DateTime, nullable=True)    # 有効化時の次回更新日
+    note          = Column(Text, default="")
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    paid_at       = Column(DateTime, nullable=True)
 
 class StripeConfig(Base):
     __tablename__ = "stripe_configs"
@@ -121,6 +137,53 @@ def get_subscription(store_id: int,
         if not sub:
             return {"status": "inactive", "store_id": store_id}
         return {k: v for k, v in sub.__dict__.items() if not k.startswith("_")}
+    finally:
+        db.close()
+
+# ─────────────────────────── 共通ヘルパー（killスイッチ用） ───────────────────────────
+
+ACTIVE_STATUSES = ("active", "trialing")
+
+def is_pos_locked(db) -> tuple[bool, str]:
+    """サブスク状態に基づきPOSをロックすべきか判定。
+    返り値: (ロックすべき, 理由)
+
+    判定ルール：
+    - サブスクが一度も作成されていない → ロックしない（新規導入の猶予）
+    - status が active/trialing → ロックしない
+    - status がそれ以外でも、current_period_end が未来（= 既払い期間内）→ ロックしない（猶予）
+    - 上記以外（期間終了済 or 期間情報なし） → ロック
+    """
+    sub = db.query(StripeSubscription).first()
+    if not sub:
+        return False, "no_subscription"
+    if sub.status in ACTIVE_STATUSES:
+        return False, sub.status
+    # 解約済み・支払い遅延でも、支払い済み期間が残っていれば使える
+    if sub.current_period_end and sub.current_period_end > datetime.utcnow():
+        return False, f"{sub.status or 'inactive'}_grace"
+    return True, sub.status or "inactive"
+
+@router.get("/stripe/status")
+def stripe_status(store_id: int = 1):
+    """サブスク状態（認証不要・middleware用）"""
+    db = SessionLocal()
+    try:
+        sub = db.query(StripeSubscription).filter_by(store_id=store_id).first()
+        if not sub:
+            sub = db.query(StripeSubscription).first()
+        if not sub:
+            return {"status": "none", "locked": False}
+        locked, reason = is_pos_locked(db)
+        in_grace = (not locked) and sub.status not in ACTIVE_STATUSES
+        return {
+            "status": sub.status or "inactive",
+            "locked": locked,
+            "in_grace": in_grace,
+            "current_period_end": sub.current_period_end.isoformat() if sub.current_period_end else None,
+            "cancel_at_end": bool(sub.cancel_at_end),
+            "plan_name": sub.plan_name or "",
+        }
     finally:
         db.close()
 
@@ -226,6 +289,131 @@ async def stripe_webhook(request: Request):
     finally:
         db.close()
 
+# ─────────────────────────── 振込申し込み・手動有効化 ───────────────────────────
+
+class BankSignupIn(BaseModel):
+    shop_name: str
+    contact_name: str
+    contact_phone: str = ""
+    contact_email: str
+    note: str = ""
+
+class ManualActivateIn(BaseModel):
+    store_id: int
+    period_end: str  # "YYYY-MM-DD"
+    payment_method: str = "bank"  # bank / manual
+    plan_name: str = "monthly_bank"
+
+@router.post("/signup/bank")
+def create_bank_signup(payload: BankSignupIn):
+    """口座振込の申し込み受付（公開エンドポイント・認証不要）"""
+    if not payload.shop_name or not payload.contact_name or not payload.contact_email:
+        raise HTTPException(400, "店舗名・担当者名・メールアドレスは必須です")
+    db = SessionLocal()
+    try:
+        signup = BankSignup(
+            shop_name=payload.shop_name.strip(),
+            contact_name=payload.contact_name.strip(),
+            contact_phone=payload.contact_phone.strip(),
+            contact_email=payload.contact_email.strip(),
+            note=payload.note.strip(),
+            status="pending",
+        )
+        db.add(signup)
+        db.commit()
+        db.refresh(signup)
+        return {"ok": True, "signup_id": signup.id}
+    finally:
+        db.close()
+
+@router.get("/admin/signups")
+def list_signups(status: Optional[str] = None,
+                 x_role: Optional[str] = Header(None, alias="X-Role")):
+    """振込申し込み一覧（admin限定）"""
+    require_role(x_role, ADMIN_ROLES)
+    db = SessionLocal()
+    try:
+        q = db.query(BankSignup)
+        if status:
+            q = q.filter_by(status=status)
+        rows = q.order_by(BankSignup.created_at.desc()).all()
+        return [{
+            "id": r.id,
+            "shop_name": r.shop_name,
+            "contact_name": r.contact_name,
+            "contact_phone": r.contact_phone,
+            "contact_email": r.contact_email,
+            "status": r.status,
+            "store_id": r.store_id,
+            "period_end": r.period_end.isoformat() if r.period_end else None,
+            "note": r.note,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "paid_at": r.paid_at.isoformat() if r.paid_at else None,
+        } for r in rows]
+    finally:
+        db.close()
+
+@router.post("/admin/signups/{signup_id}/activate")
+def activate_signup(signup_id: int, payload: ManualActivateIn,
+                     x_role: Optional[str] = Header(None, alias="X-Role")):
+    """振込入金確認 → サブスクを手動で有効化"""
+    require_role(x_role, ADMIN_ROLES)
+    try:
+        period_dt = datetime.strptime(payload.period_end, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, "period_end は YYYY-MM-DD 形式で指定してください")
+    db = SessionLocal()
+    try:
+        signup = db.query(BankSignup).filter_by(id=signup_id).first()
+        if not signup:
+            raise HTTPException(404, "申し込みが見つかりません")
+        # サブスクを作成 or 更新
+        sub = db.query(StripeSubscription).filter_by(store_id=payload.store_id).first()
+        if not sub:
+            sub = StripeSubscription(store_id=payload.store_id)
+            db.add(sub)
+        sub.status             = "active"
+        sub.payment_method     = payload.payment_method
+        sub.plan_name          = payload.plan_name
+        sub.current_period_end = period_dt
+        sub.cancel_at_end      = False
+        sub.updated_at         = datetime.utcnow()
+        # 申し込みを入金済みに
+        signup.status     = "paid"
+        signup.store_id   = payload.store_id
+        signup.period_end = period_dt
+        signup.paid_at    = datetime.utcnow()
+        db.commit()
+        return {"ok": True, "store_id": payload.store_id, "period_end": payload.period_end}
+    finally:
+        db.close()
+
+@router.post("/subscription/manual-activate")
+def manual_activate(payload: ManualActivateIn,
+                    x_role: Optional[str] = Header(None, alias="X-Role")):
+    """既存店舗を手動で有効化（振込再入金など、申し込み経由しないケース用）"""
+    require_role(x_role, ADMIN_ROLES)
+    try:
+        period_dt = datetime.strptime(payload.period_end, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, "period_end は YYYY-MM-DD 形式で指定してください")
+    db = SessionLocal()
+    try:
+        sub = db.query(StripeSubscription).filter_by(store_id=payload.store_id).first()
+        if not sub:
+            sub = StripeSubscription(store_id=payload.store_id)
+            db.add(sub)
+        sub.status             = "active"
+        sub.payment_method     = payload.payment_method
+        sub.plan_name          = payload.plan_name
+        sub.current_period_end = period_dt
+        sub.cancel_at_end      = False
+        sub.updated_at         = datetime.utcnow()
+        db.commit()
+        return {"ok": True, "store_id": payload.store_id, "period_end": payload.period_end}
+    finally:
+        db.close()
+
 # ─────────────────────────── Subscription UI ───────────────────────────
 
 @router.get("/ui/subscription", response_class=HTMLResponse)
@@ -300,6 +488,32 @@ input{font-size:14px;padding:7px 10px;border-radius:8px;border:1px solid #263244
     </div>
   </div>
 
+  <!-- 振込・手動有効化 -->
+  <div class="card">
+    <h2>🏦 振込・手動有効化（管理者用）</h2>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">
+      振込でのお支払いを確認したら、ここから次回更新日を入力して有効化してください。
+      Stripe を経由しないお客様や、入金確認後の延長にも使えます。
+    </div>
+    <div class="grid2" style="gap:12px;margin-bottom:12px">
+      <label>店舗ID
+        <input id="ma_store" type="number" value="1"></label>
+      <label>次回更新日（この日まで利用可）
+        <input id="ma_period" type="date"></label>
+      <label>支払い方法
+        <select id="ma_method" style="font-size:14px;padding:7px 10px;border-radius:8px;border:1px solid #263244;background:#0a1220;color:var(--text)">
+          <option value="bank">口座振込</option>
+          <option value="manual">手動（その他）</option>
+        </select></label>
+      <label>プラン名（任意）
+        <input id="ma_plan" placeholder="monthly_bank" value="monthly_bank"></label>
+    </div>
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <a href="/ui/admin/signups" style="color:var(--accent);font-size:13px">📋 振込申し込み一覧 →</a>
+      <button class="btn solid" onclick="manualActivate()">この内容で有効化</button>
+    </div>
+  </div>
+
   <!-- Stripe設定 -->
   <div class="card">
     <h2>Stripe API 設定</h2>
@@ -350,8 +564,27 @@ async function api(path,opt={}){
   return ct.includes('json')?r.json():r.text();
 }
 
+async function manualActivate(){
+  const store_id=parseInt($('ma_store').value||'1');
+  const period_end=$('ma_period').value;
+  const payment_method=$('ma_method').value;
+  const plan_name=$('ma_plan').value||'monthly_bank';
+  if(!period_end){alert('次回更新日を入力してください');return;}
+  if(!confirm(`店舗ID ${store_id} を ${period_end} まで有効化します。よろしいですか？`)) return;
+  try{
+    await api('/subscription/manual-activate',{method:'POST',body:{store_id,period_end,payment_method,plan_name}});
+    alert('✅ 有効化しました');
+    loadAll();
+  }catch(e){alert('エラー: '+e.message)}
+}
+
 async function loadAll(){
   const s=$('storeId').value;
+  $('ma_store').value=s;
+  if(!$('ma_period').value){
+    const d=new Date(); d.setMonth(d.getMonth()+1);
+    $('ma_period').value=d.toISOString().slice(0,10);
+  }
   try{
     const sub=await api(`/subscription/${s}`);
     const badge=$('statusBadge');
@@ -413,3 +646,152 @@ loadAll();
 </script>
 </body></html>
 """)
+
+# ─────────────────────────── 振込申し込み一覧 UI ───────────────────────────
+
+@router.get("/ui/admin/signups", response_class=HTMLResponse)
+def ui_admin_signups():
+    return HTMLResponse(r"""<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>振込申し込み管理 - POS Start</title>
+<style>
+:root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--accent:#0ea5e9;--green:#22c55e;--red:#ef4444}
+*{box-sizing:border-box;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
+body{margin:0;background:var(--bg);color:var(--text)}
+header{position:sticky;top:0;z-index:40;display:flex;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);background:rgba(11,18,32,.95)}
+header h1{margin:0;font-size:17px}
+.nav a{color:var(--accent);text-decoration:none;font-size:14px;padding:6px 10px;border-radius:8px;border:1px solid var(--line)}
+.container{max-width:1100px;margin:0 auto;padding:20px 16px}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tab{padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:#111827;color:var(--muted);cursor:pointer;font-size:13px}
+.tab.active{background:var(--accent);color:#001018;font-weight:700;border-color:var(--accent)}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:13px}
+th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{background:#111827;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+tr:last-child td{border-bottom:none}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700}
+.b-pending{background:#78350f;color:#fcd34d}
+.b-paid{background:#14532d;color:#86efac}
+.b-canceled{background:#7f1d1d;color:#fca5a5}
+.btn{cursor:pointer;font-size:12px;padding:6px 12px;border-radius:6px;border:1px solid #334155;background:#111827;color:var(--text)}
+.btn.solid{background:var(--accent);border-color:var(--accent);color:#001018;font-weight:700}
+.empty{text-align:center;padding:40px;color:var(--muted)}
+.modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center}
+.modal.show{display:flex}
+.modal-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px;max-width:440px;width:90%}
+.modal-card h3{margin:0 0 14px;font-size:16px}
+.modal-card label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;margin-top:10px}
+.modal-card input{width:100%;padding:8px 10px;border-radius:8px;border:1px solid #263244;background:#0a1220;color:var(--text);font-size:14px}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
+</style></head><body>
+<header>
+  <h1>📋 振込申し込み管理</h1>
+  <div class="nav" style="margin-left:auto;display:flex;gap:8px">
+    <a href="/ui/subscription">← サブスク管理</a>
+    <a href="/ui">フロア</a>
+  </div>
+</header>
+
+<div class="container">
+  <div class="tabs">
+    <button class="tab active" data-status="pending" onclick="switchTab('pending')">入金待ち</button>
+    <button class="tab" data-status="paid" onclick="switchTab('paid')">入金確認済</button>
+    <button class="tab" data-status="" onclick="switchTab('')">すべて</button>
+  </div>
+
+  <div id="tableWrap"></div>
+</div>
+
+<div class="modal" id="actModal">
+  <div class="modal-card">
+    <h3>有効化する</h3>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:8px" id="actSubject"></div>
+    <label>店舗ID（新規発行 or 既存ID）<input id="actStore" type="number" value="1"></label>
+    <label>次回更新日<input id="actPeriod" type="date"></label>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">キャンセル</button>
+      <button class="btn solid" onclick="doActivate()">有効化</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let currentStatus='pending';
+let currentSignupId=null;
+
+async function api(path,opt={}){
+  const tk=sessionStorage.getItem('pos_token')||'';
+  const o={method:'GET',headers:{'Content-Type':'application/json','X-Role':'owner','X-Token':tk},...opt};
+  if(o.body&&typeof o.body!=='string') o.body=JSON.stringify(o.body);
+  const r=await fetch(path,o);
+  if(r.status===401){sessionStorage.clear();window.location.href='/';return;}
+  if(r.status===402){window.location.href='/ui/subscription';return;}
+  if(!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function switchTab(s){
+  currentStatus=s;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.status===s));
+  load();
+}
+
+async function load(){
+  const url='/admin/signups'+(currentStatus?`?status=${currentStatus}`:'');
+  try{
+    const rows=await api(url);
+    const wrap=$('tableWrap');
+    if(!rows||!rows.length){
+      wrap.innerHTML='<div class="empty">該当する申し込みはありません</div>';
+      return;
+    }
+    const labels={pending:'入金待ち',paid:'入金確認済',canceled:'キャンセル'};
+    wrap.innerHTML=`<table>
+      <thead><tr><th>受付日時</th><th>状態</th><th>店舗名</th><th>担当者</th><th>連絡先</th><th>店舗ID</th><th>有効期限</th><th></th></tr></thead>
+      <tbody>${rows.map(r=>`
+        <tr>
+          <td>${r.created_at?new Date(r.created_at).toLocaleString('ja-JP'):'—'}</td>
+          <td><span class="badge b-${r.status}">${labels[r.status]||r.status}</span></td>
+          <td>${escapeHtml(r.shop_name)}</td>
+          <td>${escapeHtml(r.contact_name)}</td>
+          <td style="font-size:11px">${escapeHtml(r.contact_email)}<br>${escapeHtml(r.contact_phone||'')}</td>
+          <td>${r.store_id||'—'}</td>
+          <td>${r.period_end?new Date(r.period_end).toLocaleDateString('ja-JP'):'—'}</td>
+          <td>${r.status==='pending'?`<button class="btn solid" onclick="openModal(${r.id},'${escapeHtml(r.shop_name)}')">有効化</button>`:''}</td>
+        </tr>`).join('')}
+      </tbody></table>`;
+  }catch(e){
+    $('tableWrap').innerHTML=`<div class="empty">読み込みエラー: ${e.message}</div>`;
+  }
+}
+
+function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+function openModal(id, name){
+  currentSignupId=id;
+  $('actSubject').textContent=name+' の入金が確認できたら、店舗IDと次回更新日を入力してください';
+  if(!$('actPeriod').value){
+    const d=new Date(); d.setMonth(d.getMonth()+1);
+    $('actPeriod').value=d.toISOString().slice(0,10);
+  }
+  $('actModal').classList.add('show');
+}
+
+function closeModal(){$('actModal').classList.remove('show');}
+
+async function doActivate(){
+  const store_id=parseInt($('actStore').value||'0');
+  const period_end=$('actPeriod').value;
+  if(!store_id||!period_end){alert('店舗IDと次回更新日は必須です');return;}
+  try{
+    await api(`/admin/signups/${currentSignupId}/activate`,{method:'POST',body:{store_id,period_end,payment_method:'bank',plan_name:'monthly_bank'}});
+    closeModal();
+    alert('✅ 有効化しました');
+    load();
+  }catch(e){alert('エラー: '+e.message)}
+}
+
+load();
+</script>
+</body></html>""")
