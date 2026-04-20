@@ -1550,6 +1550,56 @@ def cancel_douhan(session_id: int, x_role: Optional[Role] = Header(None, alias="
     finally:
         db.close()
 
+@app.post("/sessions/{session_id}/nominations")
+def add_nomination(session_id: int, payload: dict, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """本指名 / 場内指名登録API（hon または jyonai）"""
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    cast_id = payload.get("cast_id")
+    nomi_type = payload.get("nomi_type")
+    if nomi_type not in ("hon", "jyonai"):
+        raise HTTPException(400, "nomi_type は 'hon' または 'jyonai' を指定してください")
+    if not cast_id:
+        raise HTTPException(400, "cast_id は必須です")
+    db = SessionLocal()
+    try:
+        s = db.get(Session, session_id)
+        if not s or s.status != "open":
+            raise HTTPException(404, "Session not found or closed")
+        nom = Nomination(store_id=s.store_id, session_id=session_id,
+                         cast_id=cast_id, nomi_type=nomi_type, fee=0.0)
+        db.add(nom)
+        db.commit()
+        _safe_notify("nomination", {"session_id": session_id, "cast_id": cast_id, "nomi_type": nomi_type})
+        return {"ok": True, "nomination_id": nom.id}
+    finally:
+        db.close()
+
+@app.delete("/sessions/{session_id}/nominations/{nomination_id}")
+def delete_nomination(session_id: int, nomination_id: int, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """指名取消API"""
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    db = SessionLocal()
+    try:
+        nom = db.query(Nomination).filter_by(id=nomination_id, session_id=session_id).first()
+        if not nom:
+            raise HTTPException(404, "指名記録が見つかりません")
+        db.delete(nom)
+        db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
+@app.get("/sessions/{session_id}/nominations")
+def list_nominations(session_id: int, x_role: Optional[Role] = Header(None, alias="X-Role")):
+    """セッションの指名一覧取得"""
+    require_role(x_role, ["owner","manager","cashier","staff"])
+    db = SessionLocal()
+    try:
+        noms = db.query(Nomination).filter_by(session_id=session_id).all()
+        return [{"id": n.id, "cast_id": n.cast_id, "nomi_type": n.nomi_type} for n in noms]
+    finally:
+        db.close()
+
 @app.post("/sessions/{session_id}/discount")
 def apply_discount(session_id: int, payload: dict, x_role: Optional[Role] = Header(None, alias="X-Role")):
     """セッションに割引を適用"""
@@ -1608,8 +1658,22 @@ def cancel_order(session_id: int, payload: OrderIn, x_role: Optional[Role] = Hea
                 break
             if o.qty <= to_cancel:
                 to_cancel -= o.qty
+                # ドリンクバック / ボトルバック記録も一緒に削除
+                try:
+                    from cast_salary import DrinkBackRecord
+                    db.query(DrinkBackRecord).filter_by(order_id=o.id).delete()
+                except Exception:
+                    pass
                 db.delete(o)
             else:
+                # 部分キャンセル: バック金額を比率で減算
+                try:
+                    from cast_salary import DrinkBackRecord
+                    back = db.query(DrinkBackRecord).filter_by(order_id=o.id).first()
+                    if back:
+                        back.amount = back.amount * (o.qty - to_cancel) / o.qty
+                except Exception:
+                    pass
                 o.qty -= to_cancel
                 to_cancel = 0
         db.commit()
@@ -2273,6 +2337,10 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
               <button class="bigbtn" id="btnDouhan" style="text-align:center;font-size:12px;background:#4a1942;border-color:#e879f9;color:#f0abfc;font-weight:700">同伴</button>
               <button class="bigbtn" id="btnDiscount" style="text-align:center;font-size:12px;background:#14352a;border-color:#4ade80;color:#4ade80;font-weight:700">割引</button>
             </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+              <button class="bigbtn" id="btnNomHon" style="text-align:center;font-size:12px;background:#1c1a3a;border-color:#818cf8;color:#c7d2fe;font-weight:700">本指名+</button>
+              <button class="bigbtn" id="btnNomJyonai" style="text-align:center;font-size:12px;background:#1c1a3a;border-color:#818cf8;color:#c7d2fe;font-weight:700">場内指名+</button>
+            </div>
             <div style="display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:8px">
               <button class="bigbtn" id="btnCancelCheckin" style="text-align:center;font-size:12px;color:#fca5a5;border-color:#7f1d1d">入店取消</button>
             </div>
@@ -2819,6 +2887,32 @@ async function changeStartTime(){
   toast(`スタート時間を ${input} に変更しました`); await refreshBill(); await loadFloor(); refreshSales();
 }
 
+/* 本指名 / 場内指名登録 */
+async function recordNomination(nomiType){
+  if (!currentSessionId) return toast('テーブルを選択してください','err');
+  let casts;
+  try{ casts = await api(`/casts?store_id=${store()}`); }
+  catch{ return toast('キャスト取得に失敗しました','err'); }
+  if(!casts||!casts.length) return toast('キャストが登録されていません','err');
+
+  const label = nomiType === 'hon' ? '本指名' : '場内指名';
+  const options = casts.map(c=>`${c.id}: ${c.name}`).join('\n');
+  const input = prompt(`${label}キャストを選択\n番号を入力してください:\n\n${options}`);
+  if(!input) return;
+  const castId = parseInt(input.split(':')[0], 10);
+  if(isNaN(castId)) return toast('正しい番号を入力してください','err');
+  const cast = casts.find(c=>c.id===castId);
+  if(!cast) return toast('該当するキャストが見つかりません','err');
+
+  try{
+    await api(`/sessions/${currentSessionId}/nominations`, {method:'POST', body:{cast_id: castId, nomi_type: nomiType}});
+    toast(`${label}: ${cast.name}`, `セッション ${currentSessionId} に${label}を登録しました`, 'ok');
+    await refreshBill();
+  }catch(e){
+    toast(`${label}登録エラー`, e.message||'登録に失敗しました','err');
+  }
+}
+
 /* 同伴登録 */
 async function recordDouhan(){
   if (!currentSessionId) return toast('テーブルを選択してください','err');
@@ -3042,6 +3136,8 @@ async function initUI(){
   $('btnChangeStart').addEventListener('click', ()=>changeStartTime().catch(e=>toast(e.message,'err')));
   $('btnDouhan').addEventListener('click', ()=>recordDouhan().catch(e=>toast(e.message,'err')));
   $('btnDiscount').addEventListener('click', ()=>applyDiscount().catch(e=>toast(e.message,'err')));
+  $('btnNomHon').addEventListener('click', ()=>recordNomination('hon').catch(e=>toast(e.message,'err')));
+  $('btnNomJyonai').addEventListener('click', ()=>recordNomination('jyonai').catch(e=>toast(e.message,'err')));
 
   // 支払い（3方法）
   $('btnPayCash').addEventListener('click', ()=>payMethod('cash').catch(e=>toast(e.message,'err')));
@@ -3232,11 +3328,14 @@ def ui_attendance():
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>出退勤 - Girls Bar POS</title>
 <script>
-// 早期ガード: オーナー以外はアクセス不可
-if(sessionStorage.getItem('pos_role')!=='owner'){
-  alert('この画面はオーナー専用です');
-  window.location.href='/ui';
-}
+// 早期ガード: スタッフ等のオーナー以外を弾く（未設定はowner扱い: コードベース規約に準拠）
+(function(){
+  const role = sessionStorage.getItem('pos_role') || 'owner';
+  if(role !== 'owner'){
+    alert('この画面はオーナー専用です');
+    window.location.href='/ui';
+  }
+})();
 </script>
 <style>
 :root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--accent:#0ea5e9;--green:#22c55e;--red:#ef4444}
@@ -3656,8 +3755,9 @@ async function doDelete(){
 
 // 初期化
 (function init(){
-  // ロールチェック（フロント側でも早期ガード）
-  if(sessionStorage.getItem('pos_role')!=='owner'){
+  // ロールチェック（フロント側でも早期ガード）— 未設定はowner扱い（規約準拠）
+  const role = sessionStorage.getItem('pos_role') || 'owner';
+  if(role !== 'owner'){
     alert('このページはオーナー専用です');
     window.location.href='/ui/attendance';
     return;
