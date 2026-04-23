@@ -1095,7 +1095,24 @@ def compute_bill(db, s: Session) -> Dict:
         # 固定額引き
         discount_amount = s.discount_value
 
-    subtotal = time_amount + order_subtotal + table_charge + vip_fee - discount_amount
+    # 指名料（本指名・場内指名・同伴）
+    nomination_fee = 0.0
+    nomination_breakdown = []
+    try:
+        _nomi_labels = {"hon": "本指名料", "jyonai": "場内指名料", "dohan": "同伴料"}
+        for n in s.nominations:
+            if n.fee and n.fee > 0:
+                label = _nomi_labels.get(n.nomi_type, "指名料")
+                cast_name = n.cast.name if n.cast else ""
+                nomination_breakdown.append({
+                    "label": f"{label}（{cast_name}）" if cast_name else label,
+                    "amount": float(n.fee),
+                })
+                nomination_fee += n.fee
+    except Exception:
+        pass
+
+    subtotal = time_amount + order_subtotal + table_charge + vip_fee + nomination_fee - discount_amount
     subtotal = max(0, subtotal)
 
     # 深夜加算
@@ -1143,6 +1160,8 @@ def compute_bill(db, s: Session) -> Dict:
             for o in s.orders
         ],
         "order_subtotal": order_subtotal,
+        "nomination_fee": float(nomination_fee),
+        "nominations": nomination_breakdown,
         "discount_label": discount_label,
         "discount_type": discount_type,
         "discount_amount": float(discount_amount),
@@ -1534,7 +1553,13 @@ def record_douhan(session_id: int, payload: dict, x_role: Optional[Role] = Heade
         existing = db.query(Nomination).filter_by(session_id=session_id, nomi_type="dohan").first()
         if existing:
             raise HTTPException(400, "This session already has douhan registered")
-        nom = Nomination(store_id=s.store_id, session_id=session_id, cast_id=cast_id, nomi_type="dohan", fee=0.0)
+        try:
+            from cast_salary import CastSalaryConfig
+            cfg = db.query(CastSalaryConfig).filter_by(cast_id=cast_id).first()
+            dohan_fee = float(cfg.nom_fee_dohan) if cfg and cfg.nom_fee_dohan else 0.0
+        except Exception:
+            dohan_fee = 0.0
+        nom = Nomination(store_id=s.store_id, session_id=session_id, cast_id=cast_id, nomi_type="dohan", fee=dohan_fee)
         db.add(nom)
         db.commit()
         _safe_notify("douhan", {"session_id": session_id, "cast_id": cast_id})
@@ -1572,8 +1597,17 @@ def add_nomination(session_id: int, payload: dict, x_role: Optional[Role] = Head
         s = db.get(Session, session_id)
         if not s or s.status != "open":
             raise HTTPException(404, "Session not found or closed")
+        try:
+            from cast_salary import CastSalaryConfig
+            cfg = db.query(CastSalaryConfig).filter_by(cast_id=cast_id).first()
+            if cfg:
+                nom_fee = float(cfg.nom_fee_hon) if nomi_type == "hon" else float(cfg.nom_fee_jyonai)
+            else:
+                nom_fee = 0.0
+        except Exception:
+            nom_fee = 0.0
         nom = Nomination(store_id=s.store_id, session_id=session_id,
-                         cast_id=cast_id, nomi_type=nomi_type, fee=0.0)
+                         cast_id=cast_id, nomi_type=nomi_type, fee=nom_fee)
         db.add(nom)
         db.commit()
         _safe_notify("nomination", {"session_id": session_id, "cast_id": cast_id, "nomi_type": nomi_type})
@@ -2387,6 +2421,12 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
             </div>
           </div>
           <div id="pane-bottle">
+            <div style="margin-bottom:10px;padding:8px;border:1px solid #2a384f;border-radius:10px;background:#0a1624">
+              <div style="font-size:12px;color:var(--muted);margin-bottom:4px">ボトルバック対象キャスト</div>
+              <select id="bottleCastSelect" style="width:100%;font-size:15px;padding:8px 10px;border-radius:8px;border:1px solid #263244;background:var(--card);color:var(--text)">
+                <option value="">なし（テーブルボトル）</option>
+              </select>
+            </div>
             <div id="listBottle" class="grid"></div>
             <div class="row" style="justify-content:flex-end;margin-top:10px">
               <button class="btn solid" id="applyBottle" style="font-size:15px;padding:10px 20px">注文確定</button>
@@ -2692,10 +2732,17 @@ function floorTick(){
 /* キャスト読み込み（ドリンクバック用セレクト） */
 async function loadCasts(){
   try{
-    const sel=$('drinkCastSelect'); if(!sel) return;
     const casts = await api(`/casts?store_id=${store()}`);
-    sel.innerHTML='<option value="">なし（お客様用）</option>';
-    casts.forEach(c=>{ sel.innerHTML+=`<option value="${c.id}">${c.name}</option>`; });
+    const selDrink = $('drinkCastSelect');
+    const selBottle = $('bottleCastSelect');
+    if(selDrink){
+      selDrink.innerHTML='<option value="">なし（お客様用）</option>';
+      casts.forEach(c=>{ selDrink.innerHTML+=`<option value="${c.id}">${c.name}</option>`; });
+    }
+    if(selBottle){
+      selBottle.innerHTML='<option value="">なし（テーブルボトル）</option>';
+      casts.forEach(c=>{ selBottle.innerHTML+=`<option value="${c.id}">${c.name}</option>`; });
+    }
   }catch{}
 }
 
@@ -2748,11 +2795,20 @@ async function applyCategory(cat){
     });
   }catch{}
 
-  // ドリンクの場合はキャスト選択を取得
+  // ドリンク/ボトルの場合はキャスト選択を取得
   let castId = null;
   if (cat === 'drink') {
     const sel = $('drinkCastSelect');
     castId = sel ? (parseInt(sel.value) || null) : null;
+  } else if (cat === 'bottle') {
+    const sel = $('bottleCastSelect');
+    castId = sel ? (parseInt(sel.value) || null) : null;
+  }
+
+  // キャスト未選択の場合に確認ダイアログ
+  if ((cat === 'drink' || cat === 'bottle') && !castId) {
+    const label = cat === 'drink' ? 'ドリンク' : 'ボトル';
+    if (!confirm(`⚠️ キャストが選択されていません。\nバックなし（お店売上）として${label}を注文しますか？`)) return;
   }
 
   // 反映：ここでは「指定数を新規で追加」＋ 減算は cancel API を試行
@@ -2841,11 +2897,19 @@ async function payCash(amount){
 }
 async function checkout(){
   if (!currentSessionId) throw new Error('セッションがありません');
-  try{ await api(`/sessions/${currentSessionId}/checkout`, {method:'POST'}); toast('会計を確定しました'); }
+  const sid = currentSessionId; // 会計前に退避
+  try{ await api(`/sessions/${sid}/checkout`, {method:'POST'}); }
   catch(e){ console.warn(e); toast('会計API未実装の可能性（UIは続行）','err'); }
+  // 会計確定後に領収書ポップアップを自動表示
+  try{
+    const d = await api(`/sessions/${sid}/receipt`);
+    openReceiptWindow(d);
+    toast('会計を確定しました — 領収書を表示しました');
+  }catch(e){
+    toast('会計を確定しました');
+  }
   currentSessionId=null; currentBill=null; $('selSess').textContent='-'; reflectAutoExtendBtn();
   renderTimer(null); renderBill(null); await loadFloor(); refreshSales();
-  renderTimer(null); renderBill(null);
 }
 
 /* 人数変更 */
@@ -3052,6 +3116,9 @@ function renderBill(b){
   if(b.order_subtotal>0) lines.push(row('オーダー小計', toYen(b.order_subtotal)));
   if (b.table_charge > 0) lines.push(row('お通し/TC', toYen(b.table_charge)));
   if (b.vip_fee > 0)      lines.push(row('VIP席料', toYen(b.vip_fee)));
+  if (b.nomination_fee > 0) {
+    (b.nominations||[]).forEach(n => lines.push(row(n.label, toYen(n.amount), 'accent')));
+  }
   if (b.night_surcharge > 0) lines.push(row('深夜加算', toYen(b.night_surcharge)));
   if (b.discount_amount > 0) lines.push(row(`割引（${b.discount_label||''}）`, '-'+toYen(b.discount_amount), 'discount'));
   lines.push(`<hr>`);
@@ -3158,62 +3225,76 @@ async function initUI(){
     checkout().catch(e=>toast(e.message,'err'));
   });
 
-  // 領収書印刷
+  // 領収書ポップアップ表示（会計確定後・ボタン押下の両方から呼ぶ）
+  function openReceiptWindow(d){
+    const b = d.bill, st = d.store;
+    const now = new Date().toLocaleString('ja-JP');
+    const orderRows = (b.orders||[]).map(o=>
+      `<tr><td>${o.name}${o.qty>1?' x'+o.qty:''}</td><td style="text-align:right">¥${Math.round(o.amount).toLocaleString()}</td></tr>`
+    ).join('');
+    const nomiRows = (b.nominations||[]).map(n=>
+      `<tr><td>${n.label}</td><td style="text-align:right">¥${Math.round(n.amount).toLocaleString()}</td></tr>`
+    ).join('');
+    const w = window.open('','_blank','width=420,height=650');
+    if(!w){ toast('ポップアップがブロックされています。許可してください。','err'); return; }
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8">
+      <title>領収書・明細</title>
+      <style>body{font-family:sans-serif;font-size:13px;padding:20px;color:#111}
+      h2{text-align:center;font-size:18px;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:12px}
+      table{width:100%;border-collapse:collapse;margin:8px 0}
+      td,th{padding:4px 6px}th{text-align:left;font-weight:600;border-bottom:1px solid #ccc;font-size:11px;color:#666}
+      .right{text-align:right}.total{font-size:16px;font-weight:bold;border-top:2px solid #000}
+      .subtotal-row{border-top:1px solid #ccc}.muted{color:#666;font-size:11px}
+      .change{font-size:15px;font-weight:bold;color:#006800}
+      @media print{button{display:none}.no-print{display:none}}</style>
+      </head><body>
+      <h2>領 収 書 ・ 明 細</h2>
+      <div style="text-align:center;margin-bottom:10px">
+        <div style="font-size:11px;color:#666">${now}</div>
+        <div style="font-size:11px">NO: ${d.invoice_no}</div>
+      </div>
+      <table>
+        <tr><td class="muted">テーブル</td><td>${b.table||''}</td></tr>
+        <tr><td class="muted">人数</td><td>${b.guest_count}名</td></tr>
+        <tr><td class="muted">入店</td><td>${new Date(b.start_time).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}</td></tr>
+        <tr><td class="muted">退店</td><td>${new Date(b.end_time).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}</td></tr>
+      </table>
+      <table>
+        <tr><th>品目</th><th style="text-align:right">金額</th></tr>
+        <tr><td>セット料金</td><td class="right">¥${Math.round(b.time_breakdown?.time_amount||0).toLocaleString()}</td></tr>
+        ${b.table_charge>0?`<tr><td>お通し/TC</td><td class="right">¥${Math.round(b.table_charge).toLocaleString()}</td></tr>`:''}
+        ${b.vip_fee>0?`<tr><td>VIP席料</td><td class="right">¥${Math.round(b.vip_fee).toLocaleString()}</td></tr>`:''}
+        ${orderRows}
+        ${nomiRows}
+        ${b.night_surcharge>0?`<tr><td>深夜加算</td><td class="right">¥${Math.round(b.night_surcharge).toLocaleString()}</td></tr>`:''}
+        ${b.discount_amount>0?`<tr><td>割引（${b.discount_label||''}）</td><td class="right">-¥${Math.round(b.discount_amount).toLocaleString()}</td></tr>`:''}
+        <tr class="subtotal-row"><td>小計</td><td class="right">¥${Math.round(b.subtotal).toLocaleString()}</td></tr>
+        <tr><td>サービス料</td><td class="right">¥${Math.round(b.service_fee).toLocaleString()}</td></tr>
+        <tr><td>消費税(10%)</td><td class="right">¥${Math.round(b.tax).toLocaleString()}</td></tr>
+        <tr class="total"><td>合 計</td><td class="right">¥${Math.round(b.total).toLocaleString()}</td></tr>
+        <tr><td>お支払い済み</td><td class="right">¥${Math.round(b.paid).toLocaleString()}</td></tr>
+        <tr><td class="change">お釣り</td><td class="right change">¥${Math.max(0,Math.round(b.paid-b.total)).toLocaleString()}</td></tr>
+      </table>
+      <div style="margin-top:16px;text-align:center;font-size:11px;color:#666">
+        <div style="font-weight:600">${st.legal_name||''}</div>
+        <div>${st.address||''}</div>
+        ${st.tel?`<div>TEL: ${st.tel}</div>`:''}
+        ${st.invoice_reg_no?`<div>登録番号: ${st.invoice_reg_no}</div>`:''}
+      </div>
+      <div style="text-align:center;margin-top:14px" class="no-print">
+        <button onclick="window.print()" style="padding:10px 28px;font-size:14px;cursor:pointer">🖨️ 印刷</button>
+      </div>
+      </body></html>`);
+    w.document.close();
+  }
+
+  // 領収書ボタン（open中のセッションでも closed後でも使える）
   $('btnReceipt')?.addEventListener('click', async ()=>{
     const sid = currentSessionId;
     if (!sid) return toast('セッションを選択してください','err');
     try{
       const d = await api(`/sessions/${sid}/receipt`);
-      const b = d.bill, st = d.store;
-      const now = new Date().toLocaleString('ja-JP');
-      const rows = (b.orders||[]).map(o=>
-        `<tr><td>${o.name}</td><td style="text-align:right">¥${Math.round(o.amount).toLocaleString()}</td></tr>`
-      ).join('');
-      const w = window.open('','_blank','width=400,height=600');
-      if(!w){ toast('ポップアップがブロックされています。許可してください。','err'); return; }
-      w.document.write(`<!doctype html><html><head><meta charset="utf-8">
-        <title>領収書</title>
-        <style>body{font-family:sans-serif;font-size:13px;padding:20px;color:#111}
-        h2{text-align:center;font-size:18px;border-bottom:2px solid #000;padding-bottom:8px}
-        table{width:100%;border-collapse:collapse;margin:10px 0}
-        td,th{padding:4px 6px}
-        .right{text-align:right}.total{font-size:16px;font-weight:bold;border-top:2px solid #000}
-        .muted{color:#666;font-size:11px}@media print{button{display:none}}</style>
-        </head><body>
-        <h2>領 収 書</h2>
-        <div style="text-align:center;margin-bottom:8px">
-          <div style="font-size:11px;color:#666">${now}</div>
-          <div style="font-size:11px">NO: ${d.invoice_no}</div>
-        </div>
-        <table>
-          <tr><td class="muted">テーブル</td><td>${b.table||''}</td></tr>
-          <tr><td class="muted">人数</td><td>${b.guest_count}名</td></tr>
-          <tr><td class="muted">入店</td><td>${new Date(b.start_time).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}</td></tr>
-        </table>
-        <table><tr><th style="text-align:left">品目</th><th style="text-align:right">金額</th></tr>
-          <tr><td>セット料金</td><td class="right">¥${Math.round(b.time_breakdown?.time_amount||0).toLocaleString()}</td></tr>
-          ${b.table_charge>0?`<tr><td>お通し/TC</td><td class="right">¥${Math.round(b.table_charge).toLocaleString()}</td></tr>`:''}
-          ${b.vip_fee>0?`<tr><td>VIP席料</td><td class="right">¥${Math.round(b.vip_fee).toLocaleString()}</td></tr>`:''}
-          ${rows}
-          ${b.night_surcharge>0?`<tr><td>深夜加算</td><td class="right">¥${Math.round(b.night_surcharge).toLocaleString()}</td></tr>`:''}
-          <tr><td>小計</td><td class="right">¥${Math.round(b.subtotal).toLocaleString()}</td></tr>
-          <tr><td>サービス料</td><td class="right">¥${Math.round(b.service_fee).toLocaleString()}</td></tr>
-          <tr><td>消費税</td><td class="right">¥${Math.round(b.tax).toLocaleString()}</td></tr>
-          <tr class="total"><td>合 計</td><td class="right">¥${Math.round(b.total).toLocaleString()}</td></tr>
-          <tr><td>お支払い済み</td><td class="right">¥${Math.round(b.paid).toLocaleString()}</td></tr>
-          <tr><td>お釣り</td><td class="right">¥${Math.max(0,Math.round(b.paid-b.total)).toLocaleString()}</td></tr>
-        </table>
-        <div style="margin-top:16px;text-align:center;font-size:11px;color:#666">
-          <div>${st.legal_name||''}</div>
-          <div>${st.address||''}</div>
-          <div>TEL: ${st.tel||''}</div>
-          ${st.invoice_reg_no?`<div>登録番号: ${st.invoice_reg_no}</div>`:''}
-        </div>
-        <div style="text-align:center;margin-top:12px">
-          <button onclick="window.print()" style="padding:8px 20px;font-size:14px">印刷</button>
-        </div>
-        </body></html>`);
-      w.document.close();
+      openReceiptWindow(d);
     }catch(e){toast('領収書エラー: '+e.message,'err')}
   });
 
