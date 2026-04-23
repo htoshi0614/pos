@@ -908,7 +908,7 @@ class OrderIn(BaseModel):
 class PaymentIn(BaseModel):
     store_id: int
     method: Literal["cash","card","qr"]
-    amount: float
+    amount: float = Field(gt=0, description="支払い金額（0より大きい値）")
 
 # ---------- 初期化 ----------
 def seed():
@@ -1100,7 +1100,7 @@ def compute_bill(db, s: Session) -> Dict:
 
     # 深夜加算
     try:
-        night_add = compute_night_surcharge(config, subtotal, s.start_time)
+        night_add = compute_night_surcharge(config, subtotal, s.start_time, end_time)
     except Exception:
         night_add = 0.0
 
@@ -1243,10 +1243,17 @@ def start_session(payload: SessionStartIn, x_role: Optional[Role]=Header(None, a
     require_role(x_role, ["owner","manager","cashier","staff"])
     db = SessionLocal()
     try:
-        # テーブル存在チェック（任意）
+        # テーブル存在チェック
         tbl = db.query(Table).filter_by(id=payload.table_id, store_id=payload.store_id).first()
         if not tbl:
             raise HTTPException(404, "Table not found")
+
+        # 同一テーブルへの重複入店チェック
+        existing = db.query(Session).filter_by(
+            table_id=payload.table_id, store_id=payload.store_id, status="open"
+        ).first()
+        if existing:
+            raise HTTPException(400, f"このテーブルはすでに使用中です（セッション #{existing.id}）。先に会計を確定してください。")
 
         s = Session(
             store_id=payload.store_id,
