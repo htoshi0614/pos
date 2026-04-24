@@ -12,7 +12,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy.orm import joinedload
 from zoneinfo import ZoneInfo
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import status
 
 # ---------- DB (共有モジュールから) ----------
@@ -1336,6 +1336,9 @@ def add_order(session_id: int, payload: OrderIn, x_role: Optional[Role] = Header
         check_closing_lock(db, s)
         item = db.get(Item, payload.item_id)
         if not item: raise HTTPException(404, "Item not found")
+        if payload.cast_id:
+            cast = db.get(Cast, payload.cast_id)
+            if not cast: raise HTTPException(404, "Cast not found")
         o = Order(store_id=s.store_id, session_id=session_id,
                   item_id=payload.item_id, qty=payload.qty, unit_price=item.price,
                   cast_id=payload.cast_id)
@@ -1374,6 +1377,8 @@ def add_payment(session_id: int, payload: PaymentIn, x_role: Optional[Role] = He
     try:
         s = db.get(Session, session_id)
         if not s: raise HTTPException(404, "Session not found")
+        if s.status != "open":
+            raise HTTPException(400, "会計済みセッションへの支払いは追加できません")
         check_closing_lock(db, s)
         p = Payment(store_id=s.store_id, session_id=session_id,
                     method=payload.method, amount=payload.amount)
@@ -1409,6 +1414,8 @@ def checkout(session_id: int, x_role: Optional[Role] = Header(None, alias="X-Rol
     try:
         s = db.get(Session, session_id)
         if not s: raise HTTPException(404, "Session not found")
+        if s.status == "closed":
+            raise HTTPException(400, "すでに会計済みです")
         check_closing_lock(db, s)
         s.status = "closed"
         s.end_time = datetime.utcnow()
@@ -1503,11 +1510,19 @@ def change_start_time(session_id: int, payload: StartTimeIn, x_role: Optional[Ro
         hm = payload.start_time.split(":")
         if len(hm) != 2:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "HH:MM形式で入力してください")
-        h, m = int(hm[0]), int(hm[1])
+        try:
+            h, m = int(hm[0]), int(hm[1])
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "HH:MM形式で入力してください")
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "00:00〜23:59 の範囲で入力してください")
         # JSTで入力された時刻をUTCに変換
         jst = timezone(timedelta(hours=9))
         now_jst = datetime.now(jst)
-        new_start_jst = now_jst.replace(hour=h, minute=m, second=0, microsecond=0)
+        try:
+            new_start_jst = now_jst.replace(hour=h, minute=m, second=0, microsecond=0)
+        except ValueError as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"無効な時刻です: {e}")
         new_start = new_start_jst.astimezone(timezone.utc).replace(tzinfo=None)
         s.start_time = new_start
         db.commit()
@@ -1549,6 +1564,9 @@ def record_douhan(session_id: int, payload: dict, x_role: Optional[Role] = Heade
         s = db.get(Session, session_id)
         if not s or s.status != "open":
             raise HTTPException(404, "Session not found or closed")
+        cast = db.get(Cast, cast_id)
+        if not cast:
+            raise HTTPException(404, "Cast not found")
         # 既に同伴登録済みかチェック
         existing = db.query(Nomination).filter_by(session_id=session_id, nomi_type="dohan").first()
         if existing:
@@ -1597,6 +1615,15 @@ def add_nomination(session_id: int, payload: dict, x_role: Optional[Role] = Head
         s = db.get(Session, session_id)
         if not s or s.status != "open":
             raise HTTPException(404, "Session not found or closed")
+        cast = db.get(Cast, cast_id)
+        if not cast:
+            raise HTTPException(404, "Cast not found")
+        # 同セッション内で同キャスト×同種別の重複チェック
+        existing_nom = db.query(Nomination).filter_by(
+            session_id=session_id, cast_id=cast_id, nomi_type=nomi_type
+        ).first()
+        if existing_nom:
+            raise HTTPException(400, "すでに同じ指名が登録されています")
         try:
             from cast_salary import CastSalaryConfig
             cfg = db.query(CastSalaryConfig).filter_by(cast_id=cast_id).first()
@@ -1650,8 +1677,12 @@ def apply_discount(session_id: int, payload: dict, x_role: Optional[Role] = Head
         s = db.get(Session, session_id)
         if not s or s.status != "open":
             raise HTTPException(404, "Session not found or closed")
+        disc_type = payload.get("disc_type", "")
+        valid_disc_types = ("fixed", "rate", "set_override", "free_drink", "")
+        if disc_type not in valid_disc_types:
+            raise HTTPException(400, f"disc_type は {', '.join(t for t in valid_disc_types if t)} のいずれかを指定してください")
         s.discount_label = payload.get("label", "")
-        s.discount_type = payload.get("disc_type", "")
+        s.discount_type = disc_type
         s.discount_value = float(payload.get("value", 0))
         db.commit()
         return {"ok": True}
@@ -1733,6 +1764,9 @@ def clock_in(payload: dict, x_role: Optional[Role] = Header(None, alias="X-Role"
         raise HTTPException(400, "store_id and cast_id required")
     db = SessionLocal()
     try:
+        cast = db.get(Cast, cast_id)
+        if not cast:
+            raise HTTPException(404, "Cast not found")
         # 既に出勤中かチェック
         existing = db.query(Attendance).filter_by(
             store_id=store_id, person_type="cast", person_id=cast_id, clock_out=None
