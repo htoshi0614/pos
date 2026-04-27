@@ -135,6 +135,11 @@ def pay_tab(tab_id: int, payload: TabPaymentIn, x_role: Optional[str] = Header(N
     try:
         t = db.get(TabRecord, tab_id)
         if not t: raise HTTPException(404, "Tab not found")
+        if t.status == "paid":
+            raise HTTPException(400, "この伝票はすでに完済済みです")
+        remaining = t.total_amount - (t.paid_amount or 0)
+        if payload.amount > remaining:
+            raise HTTPException(400, f"支払い金額（¥{int(payload.amount):,}）が残高（¥{int(remaining):,}）を超えています")
         tp = TabPayment(tab_id=tab_id, amount=payload.amount, method=payload.method, memo=payload.memo)
         db.add(tp)
         t.paid_amount = (t.paid_amount or 0) + payload.amount

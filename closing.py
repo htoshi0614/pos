@@ -94,24 +94,32 @@ def _build_z_report(db, store_id: int, biz_date: str) -> Dict:
         by_table[tname]["sales"] += session_total
 
         # キャスト別（注文のcast_id + 指名）
-        cast_sales: Dict[int, float] = {}
+        cast_appeared: set = set()  # このセッションに登場したキャストID
         for o in s.orders:
             if o.cast_id:
-                cast_sales[o.cast_id] = cast_sales.get(o.cast_id, 0) + o.unit_price * o.qty
+                cast_appeared.add(o.cast_id)
+                cast = db.query(Cast).get(o.cast_id)
+                cname = cast.name if cast else f"ID:{o.cast_id}"
+                if cname not in by_cast:
+                    by_cast[cname] = {"orders_amount": 0, "nomi_count": 0, "sessions": 0, "total": 0}
+                by_cast[cname]["orders_amount"] += o.unit_price * o.qty
+                by_cast[cname]["total"] += o.unit_price * o.qty
         for nom in s.nominations:
-            cast_sales[nom.cast_id] = cast_sales.get(nom.cast_id, 0) + nom.fee
-        for cid, amount in cast_sales.items():
-            cast = db.query(Cast).get(cid) if cid else None
-            cname = cast.name if cast else f"ID:{cid}"
-            if cname not in by_cast:
-                by_cast[cname] = {"orders_amount": 0, "nomi_count": 0, "total": 0}
-            by_cast[cname]["total"] += amount
-        for nom in s.nominations:
+            if nom.cast_id:
+                cast_appeared.add(nom.cast_id)
             cast = db.query(Cast).get(nom.cast_id) if nom.cast_id else None
             cname = cast.name if cast else f"ID:{nom.cast_id}"
             if cname not in by_cast:
-                by_cast[cname] = {"orders_amount": 0, "nomi_count": 0, "total": 0}
+                by_cast[cname] = {"orders_amount": 0, "nomi_count": 0, "sessions": 0, "total": 0}
             by_cast[cname]["nomi_count"] += 1
+            by_cast[cname]["total"] += nom.fee or 0
+        # セッション件数（キャストが登場したセッション数）
+        for cid in cast_appeared:
+            cast = db.query(Cast).get(cid)
+            cname = cast.name if cast else f"ID:{cid}"
+            if cname not in by_cast:
+                by_cast[cname] = {"orders_amount": 0, "nomi_count": 0, "sessions": 0, "total": 0}
+            by_cast[cname]["sessions"] += 1
 
         # 商品別
         for o in s.orders:
@@ -672,8 +680,8 @@ function renderTable(){
   $('tabBody').innerHTML='<h3 style="font-size:14px;margin-bottom:8px">卓別</h3>'+makeTable(['卓名','組数','来客数','売上'],rows);
 }
 function renderCast(){
-  const rows=Object.entries(report.by_cast||{}).map(([c,d])=>[c,d.nomi_count,yen(d.total)]);
-  $('tabBody').innerHTML='<h3 style="font-size:14px;margin-bottom:8px">キャスト別</h3>'+makeTable(['キャスト','指名数','売上'],rows);
+  const rows=Object.entries(report.by_cast||{}).map(([c,d])=>[c, d.sessions||0, d.nomi_count||0, yen(d.total||0)]);
+  $('tabBody').innerHTML='<h3 style="font-size:14px;margin-bottom:8px">キャスト別</h3>'+makeTable(['キャスト','組数','指名数','売上'],rows);
 }
 function renderItem(){
   const rows=Object.entries(report.by_item||{}).map(([i,d])=>[i,d.category,d.qty,yen(d.amount)]);

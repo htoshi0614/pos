@@ -126,25 +126,49 @@ def get_slot_rule(db, store_id: int, start_dt: datetime) -> Optional[TimeSlotRul
     return None
 
 def compute_night_surcharge(config: Optional[PricingConfig], subtotal: float,
-                            start_dt: datetime) -> float:
-    """深夜加算を計算して返す（22:00跨ぎ / 24:00跨ぎ）"""
+                            start_dt: datetime,
+                            end_dt: Optional[datetime] = None) -> float:
+    """深夜加算を計算して返す（22:00跨ぎ / 24:00跨ぎ）
+
+    入店時刻だけでなく「在席していた時間帯」で判定する。
+    例: 21:00入店 → 23:00退店 でも night22 が適用される。
+    """
     if not config:
         return 0.0
     start_jst = start_dt.replace(tzinfo=timezone.utc).astimezone(JST)
-    hour = start_jst.hour
+    if end_dt is None:
+        end_dt = datetime.utcnow()
+    end_jst = end_dt.replace(tzinfo=timezone.utc).astimezone(JST)
     surcharge = 0.0
 
-    if config.night22_enabled and hour >= 22:
-        if config.night22_type == "rate":
-            surcharge += subtotal * config.night22_value
-        else:
-            surcharge += config.night22_value
+    # ── 22:00サーチャージ ──────────────────────────────────────
+    # セッションが 22:00〜翌0:00 に重なっていれば適用
+    # 条件: 22時以降に入店 OR 22時以降まで滞在 OR 日をまたいだ（22:00-24:00を通過）
+    if config.night22_enabled:
+        night22_active = (
+            start_jst.hour >= 22                          # 22時以降に入店
+            or end_jst.hour >= 22                         # 22時以降まで滞在（同日）
+            or end_jst.date() > start_jst.date()          # 日またぎ（22:00-24:00を通過）
+        )
+        if night22_active:
+            if config.night22_type == "rate":
+                surcharge += subtotal * config.night22_value
+            else:
+                surcharge += config.night22_value
 
-    if config.night24_enabled and hour < 4:
-        if config.night24_type == "rate":
-            surcharge += subtotal * config.night24_value
-        else:
-            surcharge += config.night24_value
+    # ── 深夜サーチャージ（0:00〜4:00）────────────────────────
+    # セッションが翌0:00以降も続いていれば適用
+    # 条件: 日をまたいだ（0時を越えた）OR 早朝スタート（0〜3時台入店）
+    if config.night24_enabled:
+        night24_active = (
+            end_jst.date() > start_jst.date()             # 日またぎ（0時を越えた）
+            or start_jst.hour < 4                         # 深夜0〜3時台の入店
+        )
+        if night24_active:
+            if config.night24_type == "rate":
+                surcharge += subtotal * config.night24_value
+            else:
+                surcharge += config.night24_value
 
     return surcharge
 
