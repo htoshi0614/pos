@@ -721,6 +721,7 @@ class Session(Base):
     guest_count = Column(Integer, default=1)
     set_minutes = Column(Integer, default=60)
     extend_unit = Column(Integer, default=30)
+    set_fee_override = Column(Float, nullable=True)  # 入店時コース選択で指定した料金（/人）
     status = Column(String, default="open")
     note = Column(Text, default="")
     discount_label = Column(String, default="")        # 適用中の割引名
@@ -731,6 +732,16 @@ class Session(Base):
     orders = relationship("Order", back_populates="session", cascade="all,delete")
     nominations = relationship("Nomination", back_populates="session", cascade="all,delete")
     payments = relationship("Payment", back_populates="session", cascade="all,delete")
+
+class ExtensionRecord(Base):
+    """延長オプション選択で発生した延長履歴（料金追跡用）"""
+    __tablename__ = "extension_records"
+    id         = Column(Integer, primary_key=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"), index=True)
+    minutes    = Column(Integer, default=30)
+    price_pp   = Column(Float, default=3000.0)   # 1人あたり料金（円）
+    label      = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 # ---- Session -> レスポンス用の辞書に安全変換（テーブルを含む） ----
 def session_to_out_dict(s: Session) -> Dict:
@@ -889,6 +900,7 @@ class SessionStartIn(BaseModel):
     guest_count: int = 1
     set_minutes: int = 60
     extend_unit: int = 30
+    set_fee_override: Optional[float] = None  # 入店時コース選択
 class SessionOut(BaseModel):
     id: int
     store_id: int
@@ -937,7 +949,7 @@ seed()
 
 # ---------- 拡張モジュールのテーブル作成 ----------
 try:
-    from pricing_engine import PricingConfig, TimeSlotRule, DiscountRule
+    from pricing_engine import PricingConfig, TimeSlotRule, DiscountRule, SetPlanOption, ExtendOption
     from cast_salary import CastSalaryConfig, DrinkBackRecord
     from weather_service import WeatherConfig, StaffSchedule
     from stripe_service import StripeSubscription, StripeConfig, BankSignup
@@ -1010,6 +1022,18 @@ try:
 except Exception:
     pass
 
+# --- sessions.set_fee_override マイグレーション ---
+try:
+    with engine.connect() as conn:
+        from sqlalchemy import text, inspect as sa_inspect_sfo
+        cols_sfo = [c["name"] for c in sa_inspect_sfo(engine).get_columns("sessions")]
+        if "set_fee_override" not in cols_sfo:
+            conn.execute(text("ALTER TABLE sessions ADD COLUMN set_fee_override FLOAT"))
+            conn.commit()
+            print("[migrate] sessions.set_fee_override added")
+except Exception:
+    pass
+
 # --- pricing_configs.set_minutes / extend_unit マイグレーション ---
 try:
     with engine.connect() as conn:
@@ -1036,24 +1060,38 @@ def compute_bill(db, s: Session) -> Dict:
         from pricing_engine import get_pricing_config, get_slot_rule, compute_night_surcharge, compute_totals
         config   = get_pricing_config(db, s.store_id)
         slot     = get_slot_rule(db, s.store_id, s.start_time)
-        set_fee    = slot.set_price    if slot else 6000.0
-        extend_fee = slot.extend_price if slot else 3000.0
+        slot_set_fee   = slot.set_price    if slot else 6000.0
+        extend_fee     = slot.extend_price if slot else 3000.0
     except Exception:
         config = None
-        set_fee = 6000.0
+        slot_set_fee = 6000.0
         extend_fee = 3000.0
+
+    # コース選択で上書きされていればそちらを使用
+    set_fee = s.set_fee_override if s.set_fee_override is not None else slot_set_fee
 
     end_time = s.end_time or datetime.utcnow()
 
     total_minutes  = max(0, int((end_time - s.start_time).total_seconds() // 60))
     booked_minutes = int(s.set_minutes or 60)
     sets      = 1
-    remaining = max(0, total_minutes - booked_minutes)
-    eu = max(1, int(s.extend_unit or 30))
-    extends   = (remaining + eu - 1) // eu if remaining > 0 else 0
+
+    # 延長オプション選択履歴があればそれを使用（明示的な料金追跡）
+    try:
+        ext_records = db.query(ExtensionRecord).filter_by(session_id=s.id).all()
+    except Exception:
+        ext_records = []
+
+    if ext_records:
+        extends       = len(ext_records)
+        extend_amount = sum(r.price_pp * s.guest_count for r in ext_records)
+    else:
+        remaining = max(0, total_minutes - booked_minutes)
+        eu = max(1, int(s.extend_unit or 30))
+        extends       = (remaining + eu - 1) // eu if remaining > 0 else 0
+        extend_amount = extends * extend_fee * s.guest_count
 
     set_amount    = sets * set_fee * s.guest_count
-    extend_amount = extends * extend_fee * s.guest_count
     time_amount   = set_amount + extend_amount
 
     # お通し/TC・VIP席料
@@ -1280,6 +1318,7 @@ def start_session(payload: SessionStartIn, x_role: Optional[Role]=Header(None, a
             guest_count=payload.guest_count,
             set_minutes=payload.set_minutes,
             extend_unit=payload.extend_unit,
+            set_fee_override=payload.set_fee_override,
             start_time=datetime.utcnow(),
             status="open",
         )
@@ -1392,7 +1431,11 @@ class ExtendIn(BaseModel):
     minutes: int = 30
 
 @app.post("/sessions/{session_id}/extend")
-def extend_session(session_id: int, x_role: Optional[Role] = Header(None, alias="X-Role")):
+def extend_session(
+    session_id: int,
+    option_id: Optional[int] = None,  # 延長オプションID（クエリパラメータ）
+    x_role: Optional[Role] = Header(None, alias="X-Role"),
+):
     require_role(x_role, ["owner","manager","cashier","staff"])
     db = SessionLocal()
     try:
@@ -1400,10 +1443,33 @@ def extend_session(session_id: int, x_role: Optional[Role] = Header(None, alias=
         if not s or s.status != "open":
             raise HTTPException(404, "Session not found or closed")
         check_closing_lock(db, s)
-        s.set_minutes = int(s.set_minutes or 60) + int(s.extend_unit or 30)
+
+        if option_id is not None:
+            # 延長オプション選択の場合：ExtensionRecord を作成して明示的に料金を追跡
+            try:
+                from pricing_engine import ExtendOption
+                opt = db.get(ExtendOption, option_id)
+            except Exception:
+                opt = None
+            if not opt:
+                raise HTTPException(404, "延長オプションが見つかりません")
+            s.set_minutes = int(s.set_minutes or 60) + opt.minutes
+            rec = ExtensionRecord(
+                session_id=session_id,
+                minutes=opt.minutes,
+                price_pp=opt.price,
+                label=opt.label,
+            )
+            db.add(rec)
+            add_label = f"{opt.label} (+{opt.minutes}分)"
+        else:
+            # 従来の動作（延長オプション未設定のデフォルト延長）
+            s.set_minutes = int(s.set_minutes or 60) + int(s.extend_unit or 30)
+            add_label = f"+{s.extend_unit or 30}分"
+
         db.commit()
         _safe_notify("extend", {"session_id": session_id})
-        return {"ok": True, "set_minutes": s.set_minutes}
+        return {"ok": True, "set_minutes": s.set_minutes, "label": add_label}
     finally:
         db.close()
 
@@ -1429,7 +1495,9 @@ def checkout(session_id: int, x_role: Optional[Role] = Header(None, alias="X-Rol
 @app.post("/sessions/{session_id}/unextend")
 def unextend_session(session_id: int, x_role: Optional[Role] = Header(None, alias="X-Role")):
     """
-    延長取消API：set_minutesをextend_unit分だけ減算する（最低限set_minutes>=extend_unit）
+    延長取消API：直前の延長を取り消す。
+    延長オプション選択の場合は ExtensionRecord の最新1件を削除してその分を減算。
+    従来の延長の場合は extend_unit 分だけ減算（最低限 extend_unit 分は維持）。
     """
     require_role(x_role, ["owner","manager","cashier","staff"])
     db = SessionLocal()
@@ -1438,7 +1506,25 @@ def unextend_session(session_id: int, x_role: Optional[Role] = Header(None, alia
         if not s or s.status != "open":
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found or closed")
         check_closing_lock(db, s)
-        s.set_minutes = max(s.extend_unit, int(s.set_minutes or 60) - int(s.extend_unit or 30))
+
+        # 延長オプション選択履歴があれば、最新を取り消す
+        last_rec = None
+        try:
+            last_rec = (db.query(ExtensionRecord)
+                         .filter_by(session_id=session_id)
+                         .order_by(ExtensionRecord.created_at.desc())
+                         .first())
+        except Exception:
+            pass
+
+        if last_rec:
+            s.set_minutes = max(1, int(s.set_minutes or 60) - last_rec.minutes)
+            db.delete(last_rec)
+        else:
+            # 従来の動作
+            eu = int(s.extend_unit or 30)
+            s.set_minutes = max(eu, int(s.set_minutes or 60) - eu)
+
         db.commit()
         return {"ok": True, "set_minutes": s.set_minutes}
     finally:
@@ -2403,10 +2489,8 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
               </select>
               <button class="bigbtn" id="btnCheckin" style="flex:1;text-align:center;background:#0e7490;border-color:#0e7490;color:#fff;font-weight:700">入店</button>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
-              <button class="bigbtn" id="btnExtend30" style="text-align:center;font-size:14px">延長 +30分</button>
-              <button class="bigbtn" id="btnUnextend" style="text-align:center;font-size:14px">延長取消 -30分</button>
-            </div>
+            <!-- 延長ボタンエリア（JS で動的に描画）-->
+            <div id="extendBtnsArea" style="margin-bottom:8px"></div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
               <button class="bigbtn" id="btnAutoExtend" style="text-align:center;font-size:12px">自動延長 OFF</button>
               <button class="bigbtn" id="btnChangeGuest" style="text-align:center;font-size:12px;background:#1a2744;border-color:#3b82f6;color:#93c5fd">人数変更</button>
@@ -2616,12 +2700,38 @@ const floorModel = {tables:[], tableEls:{}, sessionByTable:{}, billBySession:{}}
 const qtyState = { drink:{}, bottle:{}, food:{} }; // itemId: qty（0スタート）
 
 /* 店舗セット時間設定（起動時に取得） */
-let storeTimeConfig = { set_minutes: 60, extend_unit: 30 };
+let storeTimeConfig = { set_minutes: 60, extend_unit: 30, set_plans: [], extend_options: [] };
 async function loadStoreTimeConfig(){
   try {
     const r = await api(`/settings/store-time/${store()}`);
     if(r) storeTimeConfig = r;
   } catch(e){ /* デフォルト値を使用 */ }
+  renderExtendButtons();
+}
+
+/* 延長ボタン描画（設定に応じてシングル/マルチ） */
+function renderExtendButtons(){
+  const area = $('extendBtnsArea');
+  if (!area) return;
+  const opts = (storeTimeConfig.extend_options || []).filter(o => o.is_active);
+  if (opts.length === 0) {
+    const eu = storeTimeConfig.extend_unit || 30;
+    area.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <button class="bigbtn" id="btnExtend30" style="text-align:center;font-size:14px">延長 +${eu}分</button>
+      <button class="bigbtn" id="btnUnextend" style="text-align:center;font-size:14px">延長取消 -${eu}分</button></div>`;
+    $('btnExtend30').onclick = () => extendDefault().catch(e=>toast(e.message,'err'));
+    $('btnUnextend').onclick  = () => unextend30().catch(e=>toast(e.message,'err'));
+  } else {
+    const cols = Math.min(opts.length, 3);
+    const btns = opts.map(o =>
+      `<button class="bigbtn" style="text-align:center;font-size:12px;padding:6px 4px"
+         onclick="extendWithOption(${o.id},${o.minutes},${o.price},'${(o.label||'').replace(/'/g,'\\\'')}')" >
+         延長 ${o.label}<br><small style="color:#94a3b8">¥${Math.round(o.price).toLocaleString()}/人</small></button>`
+    ).join('');
+    area.innerHTML = `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px;margin-bottom:4px">${btns}</div>
+      <button class="bigbtn" id="btnUnextend" style="width:100%;text-align:center;font-size:12px">延長取消</button>`;
+    $('btnUnextend').onclick = () => unextend30().catch(e=>toast(e.message,'err'));
+  }
 }
 
 /* タブ */
@@ -2891,24 +3001,75 @@ async function checkin(){
   }
   if (!selectedTableId) throw new Error('テーブルを選択してください');
   const gc=parseInt($('guestCount')?.value||'1',10)||1;
-  const s = await api('/sessions',{method:'POST', body:{store_id:store(), table_id:selectedTableId, guest_count:gc, set_minutes:storeTimeConfig.set_minutes, extend_unit:storeTimeConfig.extend_unit}});
+  const plans=(storeTimeConfig.set_plans||[]).filter(p=>p.is_active);
+  if(plans.length>0){
+    showSetPlanModal(gc, plans);
+  } else {
+    await _doCheckin(gc, storeTimeConfig.set_minutes, storeTimeConfig.extend_unit, null);
+  }
+}
+async function _doCheckin(gc, setMin, extUnit, setFeeOverride){
+  const s = await api('/sessions',{method:'POST', body:{store_id:store(), table_id:selectedTableId, guest_count:gc, set_minutes:setMin, extend_unit:extUnit, set_fee_override:setFeeOverride}});
   currentSessionId=s.id; $('selSess').textContent=s.id;
   autoExtendBySession[s.id]=false; reflectAutoExtendBtn();
   toast('入店しました'); await refreshBill(); await loadFloor(); refreshSales(); startLoops();
 }
-async function extend30(){
+
+/* コース選択モーダル */
+let _planCheckinGc=1;
+function showSetPlanModal(gc, plans){
+  _planCheckinGc=gc;
+  let modal=$('setPlanModal');
+  if(!modal){
+    modal=document.createElement('div');
+    modal.id='setPlanModal';
+    modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:300;display:flex;align-items:center;justify-content:center';
+    modal.innerHTML=`<div style="background:#0f172a;border:1px solid #1f2937;border-radius:16px;padding:24px;min-width:300px;max-width:420px;width:90%">
+      <h3 style="margin:0 0 16px;font-size:16px;color:#e5e7eb">コース選択</h3>
+      <div id="setPlanBtns" style="display:flex;flex-direction:column;gap:10px"></div>
+      <button onclick="document.getElementById('setPlanModal').style.display='none'" style="margin-top:14px;width:100%;padding:10px;border-radius:8px;border:1px solid #374151;background:#111827;color:#9ca3af;cursor:pointer;font-size:14px">キャンセル</button>
+    </div>`;
+    document.body.appendChild(modal);
+  }
+  $('setPlanBtns').innerHTML=plans.map(p=>
+    `<button onclick="checkinWithPlan(${p.id})"
+      style="padding:14px 16px;border-radius:10px;border:1px solid #0ea5e9;background:#082f49;color:#e5e7eb;cursor:pointer;font-size:15px;text-align:left;width:100%">
+      <div style="font-weight:700">${p.label}</div>
+      <div style="font-size:13px;color:#94a3b8;margin-top:3px">${p.minutes}分 · ¥${Math.round(p.price).toLocaleString()}/人</div>
+    </button>`).join('');
+  modal.style.display='flex';
+}
+async function checkinWithPlan(planId){
+  document.getElementById('setPlanModal').style.display='none';
+  const plan=(storeTimeConfig.set_plans||[]).find(p=>p.id===planId);
+  if(!plan) return toast('コースが見つかりません','err');
+  try{
+    await _doCheckin(_planCheckinGc, plan.minutes, storeTimeConfig.extend_unit, plan.price);
+  }catch(e){toast(e.message,'err')}
+}
+
+async function extendDefault(){
   if (!currentSessionId) throw new Error('セッションがありません');
   await api(`/sessions/${currentSessionId}/extend`, {method:'POST'});
-  toast('+30分 延長しました'); await refreshBill(); await loadFloor(); refreshSales();
+  const eu = storeTimeConfig.extend_unit||30;
+  toast(`延長 +${eu}分`); await refreshBill(); await loadFloor(); refreshSales();
+}
+async function extendWithOption(optId, minutes, price, label){
+  if (!currentSessionId) throw new Error('セッションがありません');
+  await api(`/sessions/${currentSessionId}/extend?option_id=${optId}`, {method:'POST'});
+  toast(`延長 ${label}`); await refreshBill(); await loadFloor(); refreshSales();
+}
+async function extend30(){
+  // 後方互換（autoExtendTick から呼ばれる）
+  await extendDefault();
 }
 async function unextend30(){
   if (!currentSessionId) throw new Error('セッションがありません');
-  // 1) 推奨: /sessions/{id}/unextend にPOST
   try{
     await api(`/sessions/${currentSessionId}/unextend`, {method:'POST'});
-    toast('−30分 延長取消しました');
+    toast('延長取消しました');
   }catch(e){
-    toast('延長取消APIが未実装です','err');
+    toast(e.message,'err');
     return;
   }
   await refreshBill(); await loadFloor();
@@ -3234,8 +3395,7 @@ function startLoops(){
 async function initUI(){
   // 入店/延長関係
   $('btnCheckin').addEventListener('click', ()=>checkin().catch(e=>toast(e.message,'err')));
-  $('btnExtend30').addEventListener('click', ()=>extend30().catch(e=>toast(e.message,'err')));
-  $('btnUnextend').addEventListener('click', ()=>unextend30().catch(e=>toast(e.message,'err')));
+  // btnExtend30 / btnUnextend は renderExtendButtons() で動的に生成・バインドされる
   $('btnAutoExtend').addEventListener('click', toggleAutoExtend);
   $('btnCancelCheckin').addEventListener('click', ()=>{
     if(!currentSessionId) return toast('セッションがありません','err');

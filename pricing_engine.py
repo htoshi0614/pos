@@ -57,6 +57,28 @@ class DiscountRule(Base):
     value      = Column(Float, default=0.0)                # fixed→円, rate→0.10=10%, set_override→セット料金, free_drink→杯数
     is_active  = Column(Boolean, default=True)
 
+class SetPlanOption(Base):
+    """入店時コース選択肢（例: 40分¥3,000 / 60分¥4,000）"""
+    __tablename__ = "set_plan_options"
+    id         = Column(Integer, primary_key=True)
+    store_id   = Column(Integer, ForeignKey("stores.id"))
+    label      = Column(String, default="")   # 例: "40分コース"
+    minutes    = Column(Integer, default=60)  # セット時間（分）
+    price      = Column(Float, default=3000.0)  # 1人あたり料金（円）
+    sort_order = Column(Integer, default=0)
+    is_active  = Column(Boolean, default=True)
+
+class ExtendOption(Base):
+    """延長オプション選択肢（例: +20分¥2,000 / +40分¥3,000 / +60分¥4,000）"""
+    __tablename__ = "extend_options"
+    id         = Column(Integer, primary_key=True)
+    store_id   = Column(Integer, ForeignKey("stores.id"))
+    label      = Column(String, default="")   # 例: "+40分"
+    minutes    = Column(Integer, default=30)  # 延長時間（分）
+    price      = Column(Float, default=3000.0)  # 1人あたり料金（円）
+    sort_order = Column(Integer, default=0)
+    is_active  = Column(Boolean, default=True)
+
 # ─────────────────────────── Pydantic ───────────────────────────
 
 class PricingConfigIn(BaseModel):
@@ -89,6 +111,20 @@ class DiscountRuleIn(BaseModel):
     label: str = ""
     disc_type: str = "fixed"       # fixed / rate / set_override / free_drink
     value: float = 0.0
+    is_active: bool = True
+
+class SetPlanOptionIn(BaseModel):
+    label: str = ""
+    minutes: int = 60
+    price: float = 3000.0
+    sort_order: int = 0
+    is_active: bool = True
+
+class ExtendOptionIn(BaseModel):
+    label: str = ""
+    minutes: int = 30
+    price: float = 3000.0
+    sort_order: int = 0
     is_active: bool = True
 
 # ─────────────────────────── Pricing Logic ───────────────────────────
@@ -196,13 +232,17 @@ def compute_totals(subtotal: float, night_add: float,
 
 @router.get("/settings/store-time/{store_id}")
 def get_store_time(store_id: int):
-    """セット時間・延長単位を返す（全ロール利用可 — 入店時にフロントが参照）"""
+    """セット時間・延長単位・コース選択肢・延長オプションを返す（全ロール利用可）"""
     db = SessionLocal()
     try:
         cfg = db.query(PricingConfig).filter_by(store_id=store_id).first()
+        plans = db.query(SetPlanOption).filter_by(store_id=store_id, is_active=True).order_by(SetPlanOption.sort_order, SetPlanOption.id).all()
+        extend_opts = db.query(ExtendOption).filter_by(store_id=store_id, is_active=True).order_by(ExtendOption.sort_order, ExtendOption.id).all()
         return {
             "set_minutes": cfg.set_minutes if cfg else 60,
             "extend_unit": cfg.extend_unit if cfg else 30,
+            "set_plans": [{"id": p.id, "label": p.label, "minutes": p.minutes, "price": p.price, "is_active": p.is_active} for p in plans],
+            "extend_options": [{"id": o.id, "label": o.label, "minutes": o.minutes, "price": o.price, "is_active": o.is_active} for o in extend_opts],
         }
     finally:
         db.close()
@@ -319,6 +359,80 @@ def delete_discount(store_id: int, disc_id: int,
         r = db.query(DiscountRule).filter_by(id=disc_id, store_id=store_id).first()
         if r:
             db.delete(r); db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
+# ─── コース選択肢 API ───
+
+@router.get("/settings/pricing/{store_id}/set-plans")
+def list_set_plans(store_id: int, x_role: Optional[str] = Header(None, alias="X-Role")):
+    """コース選択肢一覧（全ロール）"""
+    db = SessionLocal()
+    try:
+        plans = db.query(SetPlanOption).filter_by(store_id=store_id).order_by(SetPlanOption.sort_order, SetPlanOption.id).all()
+        return [{"id": p.id, "label": p.label, "minutes": p.minutes, "price": p.price, "sort_order": p.sort_order, "is_active": p.is_active} for p in plans]
+    finally:
+        db.close()
+
+@router.post("/settings/pricing/{store_id}/set-plans")
+def add_set_plan(store_id: int, payload: SetPlanOptionIn,
+                 x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
+    db = SessionLocal()
+    try:
+        p = SetPlanOption(store_id=store_id, **(payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()))
+        db.add(p); db.commit(); db.refresh(p)
+        return {"ok": True, "id": p.id}
+    finally:
+        db.close()
+
+@router.delete("/settings/pricing/{store_id}/set-plans/{plan_id}")
+def delete_set_plan(store_id: int, plan_id: int,
+                    x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
+    db = SessionLocal()
+    try:
+        p = db.query(SetPlanOption).filter_by(id=plan_id, store_id=store_id).first()
+        if p:
+            db.delete(p); db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
+# ─── 延長オプション API ───
+
+@router.get("/settings/pricing/{store_id}/extend-options")
+def list_extend_options(store_id: int, x_role: Optional[str] = Header(None, alias="X-Role")):
+    """延長オプション一覧（全ロール）"""
+    db = SessionLocal()
+    try:
+        opts = db.query(ExtendOption).filter_by(store_id=store_id).order_by(ExtendOption.sort_order, ExtendOption.id).all()
+        return [{"id": o.id, "label": o.label, "minutes": o.minutes, "price": o.price, "sort_order": o.sort_order, "is_active": o.is_active} for o in opts]
+    finally:
+        db.close()
+
+@router.post("/settings/pricing/{store_id}/extend-options")
+def add_extend_option(store_id: int, payload: ExtendOptionIn,
+                      x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
+    db = SessionLocal()
+    try:
+        o = ExtendOption(store_id=store_id, **(payload.model_dump() if hasattr(payload, 'model_dump') else payload.dict()))
+        db.add(o); db.commit(); db.refresh(o)
+        return {"ok": True, "id": o.id}
+    finally:
+        db.close()
+
+@router.delete("/settings/pricing/{store_id}/extend-options/{opt_id}")
+def delete_extend_option(store_id: int, opt_id: int,
+                         x_role: Optional[str] = Header(None, alias="X-Role")):
+    require_role(x_role, ADMIN_ROLES)
+    db = SessionLocal()
+    try:
+        o = db.query(ExtendOption).filter_by(id=opt_id, store_id=store_id).first()
+        if o:
+            db.delete(o); db.commit()
         return {"ok": True}
     finally:
         db.close()
@@ -616,6 +730,62 @@ th{color:var(--muted);font-weight:500;font-size:12px;text-transform:uppercase;le
     </div>
   </div>
 
+  <!-- ④ コース選択肢 -->
+  <div class="card">
+    <h2>🎯 コース選択肢（入店時）</h2>
+    <p class="section-desc">入店時にスタッフがコースを選べるようにします。<br>例: 「40分コース ¥3,000」「60分コース ¥4,000」など複数設定すると入店ボタンを押したときにポップアップで選択できます。<br>何も登録しない場合は従来通りデフォルトのセット時間・料金が使われます。</p>
+
+    <table id="planTable" style="display:none">
+      <thead><tr><th>コース名</th><th>時間</th><th>料金/人</th><th>有効</th><th></th></tr></thead>
+      <tbody id="planBody"></tbody>
+    </table>
+    <div id="planEmpty" class="empty-msg" style="display:none">まだコースが登録されていません。下のフォームから追加できます。</div>
+
+    <div class="add-section">
+      <div class="add-title">＋ コースを追加</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <label>コース名<input id="pl_label" placeholder="例：40分コース"></label>
+        <label>時間（分）
+          <div class="input-wrap"><input id="pl_minutes" type="number" value="60" min="10" step="5"><span class="input-unit">分</span></div>
+        </label>
+        <label>料金/人
+          <div class="input-wrap"><input id="pl_price" type="number" value="3000" min="0" step="500"><span class="input-unit">円</span></div>
+        </label>
+      </div>
+      <div class="row" style="margin-top:12px;justify-content:flex-end">
+        <button class="btn solid" onclick="addSetPlan()">追加する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ⑤ 延長オプション -->
+  <div class="card">
+    <h2>⏱️ 延長オプション</h2>
+    <p class="section-desc">POSの延長ボタンを複数の選択肢にします。<br>例: 「+20分 ¥2,000」「+40分 ¥3,000」「+60分 ¥4,000」など。<br>何も登録しない場合は従来通り一種類の延長ボタンが表示されます。</p>
+
+    <table id="extOptTable" style="display:none">
+      <thead><tr><th>ボタン名</th><th>延長時間</th><th>料金/人</th><th>有効</th><th></th></tr></thead>
+      <tbody id="extOptBody"></tbody>
+    </table>
+    <div id="extOptEmpty" class="empty-msg" style="display:none">まだ延長オプションが登録されていません。</div>
+
+    <div class="add-section">
+      <div class="add-title">＋ 延長オプションを追加</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        <label>ボタン名<input id="eo_label" placeholder="例：+40分"></label>
+        <label>延長時間（分）
+          <div class="input-wrap"><input id="eo_minutes" type="number" value="30" min="5" step="5"><span class="input-unit">分</span></div>
+        </label>
+        <label>料金/人
+          <div class="input-wrap"><input id="eo_price" type="number" value="3000" min="0" step="500"><span class="input-unit">円</span></div>
+        </label>
+      </div>
+      <div class="row" style="margin-top:12px;justify-content:flex-end">
+        <button class="btn solid" onclick="addExtendOption()">追加する</button>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <div id="toast" class="ok">保存しました</div>
@@ -698,6 +868,15 @@ async function loadAll(){
     }
     renderSlots(d.slots||[]);
     renderDiscounts(d.discounts||[]);
+    // コース選択肢・延長オプション
+    try{
+      const plans=await api(`/settings/pricing/${store()}/set-plans`);
+      renderSetPlans(plans||[]);
+    }catch{}
+    try{
+      const extOpts=await api(`/settings/pricing/${store()}/extend-options`);
+      renderExtendOptions(extOpts||[]);
+    }catch{}
   }catch(e){showToast(e.message,'err')}
 }
 
@@ -825,6 +1004,82 @@ async function deleteDiscount(id){
   if(!confirm('この割引ルールを削除しますか？'))return;
   try{
     await api(`/settings/pricing/${store()}/discounts/${id}`,{method:'DELETE'});
+    showToast('削除しました');
+    await loadAll();
+  }catch(e){showToast(e.message,'err')}
+}
+
+/* ── コース選択肢 ── */
+function renderSetPlans(plans){
+  const tb=$('planBody'); if(!tb) return;
+  tb.innerHTML='';
+  $('planEmpty').style.display = plans.length ? 'none' : 'block';
+  $('planTable').style.display = plans.length ? '' : 'none';
+  plans.forEach(p=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td style="font-weight:600">${p.label||'—'}</td>
+      <td>${p.minutes}分</td>
+      <td>¥${(p.price||0).toLocaleString()}/人</td>
+      <td>${p.is_active?'✓':'—'}</td>
+      <td><button class="btn danger" onclick="deleteSetPlan(${p.id})">削除</button></td>`;
+    tb.appendChild(tr);
+  });
+}
+async function addSetPlan(){
+  const label=$('pl_label').value.trim();
+  if(!label){showToast('コース名を入力してください','err');return;}
+  const minutes=parseInt($('pl_minutes').value||60);
+  const price=parseFloat($('pl_price').value||3000);
+  if(minutes<1||price<0){showToast('時間と料金を正しく入力してください','err');return;}
+  try{
+    await api(`/settings/pricing/${store()}/set-plans`,{method:'POST',body:{label,minutes,price,sort_order:0,is_active:true}});
+    showToast('✅ コースを追加しました');
+    $('pl_label').value='';
+    await loadAll();
+  }catch(e){showToast(e.message,'err')}
+}
+async function deleteSetPlan(id){
+  if(!confirm('このコースを削除しますか？'))return;
+  try{
+    await api(`/settings/pricing/${store()}/set-plans/${id}`,{method:'DELETE'});
+    showToast('削除しました');
+    await loadAll();
+  }catch(e){showToast(e.message,'err')}
+}
+
+/* ── 延長オプション ── */
+function renderExtendOptions(opts){
+  const tb=$('extOptBody'); if(!tb) return;
+  tb.innerHTML='';
+  $('extOptEmpty').style.display = opts.length ? 'none' : 'block';
+  $('extOptTable').style.display = opts.length ? '' : 'none';
+  opts.forEach(o=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td style="font-weight:600">${o.label||'—'}</td>
+      <td>+${o.minutes}分</td>
+      <td>¥${(o.price||0).toLocaleString()}/人</td>
+      <td>${o.is_active?'✓':'—'}</td>
+      <td><button class="btn danger" onclick="deleteExtendOption(${o.id})">削除</button></td>`;
+    tb.appendChild(tr);
+  });
+}
+async function addExtendOption(){
+  const label=$('eo_label').value.trim();
+  if(!label){showToast('ボタン名を入力してください','err');return;}
+  const minutes=parseInt($('eo_minutes').value||30);
+  const price=parseFloat($('eo_price').value||3000);
+  if(minutes<1||price<0){showToast('時間と料金を正しく入力してください','err');return;}
+  try{
+    await api(`/settings/pricing/${store()}/extend-options`,{method:'POST',body:{label,minutes,price,sort_order:0,is_active:true}});
+    showToast('✅ 延長オプションを追加しました');
+    $('eo_label').value='';
+    await loadAll();
+  }catch(e){showToast(e.message,'err')}
+}
+async function deleteExtendOption(id){
+  if(!confirm('この延長オプションを削除しますか？'))return;
+  try{
+    await api(`/settings/pricing/${store()}/extend-options/${id}`,{method:'DELETE'});
     showToast('削除しました');
     await loadAll();
   }catch(e){showToast(e.message,'err')}
