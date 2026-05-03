@@ -255,11 +255,45 @@ async def stripe_webhook(request: Request):
 
         ev_type = event.get("type", "")
         obj = event.get("data", {}).get("object", {})
-        store_id = int(obj.get("metadata", {}).get("store_id", 0))
+        meta = obj.get("metadata", {})
+        store_id = int(meta.get("store_id", 0))
 
-        if ev_type in ("customer.subscription.created",
-                       "customer.subscription.updated",
-                       "customer.subscription.deleted"):
+        # ── checkout.session.completed: 新規申し込みのカード決済完了 ──
+        if ev_type == "checkout.session.completed":
+            signup_id = int(meta.get("signup_id", 0))
+            customer_id = obj.get("customer", "")
+            stripe_sub_id = obj.get("subscription", "")
+            plan_label = meta.get("plan", "monthly")
+            if signup_id:
+                signup = db.query(BankSignup).filter_by(id=signup_id).first()
+                if signup and signup.status == "pending":
+                    # store_id = signup_id をそのまま流用
+                    new_store_id = signup_id
+                    from datetime import timedelta
+                    period_end_dt = datetime.utcnow() + timedelta(days=31)
+                    sub = db.query(StripeSubscription).filter_by(store_id=new_store_id).first()
+                    if not sub:
+                        sub = StripeSubscription(store_id=new_store_id)
+                        db.add(sub)
+                    sub.stripe_customer_id = customer_id
+                    sub.stripe_sub_id      = stripe_sub_id
+                    sub.status             = "active"
+                    sub.plan_name          = plan_label
+                    sub.current_period_end = period_end_dt
+                    sub.cancel_at_end      = False
+                    sub.payment_method     = "card"
+                    sub.updated_at         = datetime.utcnow()
+                    signup.status   = "paid"
+                    signup.store_id = new_store_id
+                    signup.period_end = period_end_dt
+                    signup.paid_at  = datetime.utcnow()
+                    db.commit()
+                    print(f"[stripe] checkout完了 signup_id={signup_id} → store_id={new_store_id}")
+
+        # ── customer.subscription.* : 既存サブスクの更新・解約 ──
+        elif ev_type in ("customer.subscription.created",
+                         "customer.subscription.updated",
+                         "customer.subscription.deleted"):
             sub_status = obj.get("status", "inactive")
             if ev_type == "customer.subscription.deleted":
                 sub_status = "canceled"
@@ -272,20 +306,92 @@ async def stripe_webhook(request: Request):
             if items:
                 plan_name = items[0].get("price", {}).get("nickname", "")
 
-            sub = db.query(StripeSubscription).filter_by(store_id=store_id).first()
-            if not sub:
-                sub = StripeSubscription(store_id=store_id)
-                db.add(sub)
-            sub.stripe_customer_id = obj.get("customer", "")
-            sub.stripe_sub_id      = obj.get("id", "")
-            sub.status             = sub_status
-            sub.plan_name          = plan_name
-            sub.current_period_end = period_dt
-            sub.cancel_at_end      = bool(obj.get("cancel_at_period_end", False))
-            sub.updated_at         = datetime.utcnow()
-            db.commit()
+            if store_id:
+                sub = db.query(StripeSubscription).filter_by(store_id=store_id).first()
+                if not sub:
+                    sub = StripeSubscription(store_id=store_id)
+                    db.add(sub)
+                sub.stripe_customer_id = obj.get("customer", "")
+                sub.stripe_sub_id      = obj.get("id", "")
+                sub.status             = sub_status
+                sub.plan_name          = plan_name
+                sub.current_period_end = period_dt
+                sub.cancel_at_end      = bool(obj.get("cancel_at_period_end", False))
+                sub.updated_at         = datetime.utcnow()
+                db.commit()
 
         return {"received": True}
+    finally:
+        db.close()
+
+# ─────────────────────────── 振込申し込み・手動有効化 ───────────────────────────
+
+# ─────────────────────────── 新規申し込み（Stripe Checkout、公開） ───────────────────────────
+
+class SignupForStripeIn(BaseModel):
+    shop_name: str
+    contact_name: str
+    contact_phone: str = ""
+    contact_email: str
+    plan: str = "monthly"   # monthly / yearly
+    base_url: str = ""
+
+@router.post("/signup/stripe")
+def create_stripe_signup(payload: SignupForStripeIn):
+    """新規申し込みのStripe Checkout作成（認証不要・公開エンドポイント）"""
+    if not payload.shop_name.strip() or not payload.contact_name.strip() or not payload.contact_email.strip():
+        raise HTTPException(400, "店舗名・担当者名・メールアドレスは必須です")
+
+    try:
+        import stripe as _stripe
+    except ImportError:
+        raise HTTPException(500, "stripe ライブラリが未インストールです（pip install stripe）")
+
+    db = SessionLocal()
+    try:
+        cfg = db.query(StripeConfig).first()
+        key = (cfg.secret_key if cfg else "") or os.environ.get("STRIPE_SECRET_KEY", "")
+        if not key:
+            raise HTTPException(400, "Stripe設定が未完了です。管理者にお問い合わせください。")
+
+        _stripe.api_key = key
+        price_id = ""
+        if cfg:
+            price_id = cfg.price_id_monthly if payload.plan == "monthly" else (cfg.price_id_yearly or cfg.price_id_monthly)
+        price_id = price_id or os.environ.get("STRIPE_PRICE_ID_MONTHLY", "")
+        if not price_id:
+            raise HTTPException(400, "Price IDが未設定です。管理者にお問い合わせください。")
+
+        # 申し込み情報を保存（BankSignupを流用、noteにstripe識別子を付与）
+        signup = BankSignup(
+            shop_name=payload.shop_name.strip(),
+            contact_name=payload.contact_name.strip(),
+            contact_phone=payload.contact_phone.strip(),
+            contact_email=payload.contact_email.strip(),
+            note=f"stripe_{payload.plan}",
+            status="pending",
+        )
+        db.add(signup)
+        db.commit()
+        db.refresh(signup)
+
+        base = payload.base_url or os.environ.get("BASE_URL", "http://localhost:8000")
+        session = _stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            mode="subscription",
+            customer_email=payload.contact_email.strip(),
+            line_items=[{"price": price_id, "quantity": 1}],
+            success_url=f"{base}/signup?checkout=success&sid={signup.id}",
+            cancel_url=f"{base}/signup?checkout=canceled",
+            metadata={
+                "signup_id": str(signup.id),
+                "shop_name": payload.shop_name.strip(),
+                "plan": payload.plan,
+            },
+        )
+        return {"checkout_url": session.url}
+    except Exception as e:
+        raise HTTPException(400, f"Stripe エラー: {str(e)}")
     finally:
         db.close()
 

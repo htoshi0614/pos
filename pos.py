@@ -181,22 +181,13 @@ body{background:var(--bg);color:var(--text);display:flex;align-items:center;just
     </div>
 
     <div class="card-fields show" id="cardSection">
-      <div class="field">
-        <label>カード番号</label>
-        <input id="cardNum" placeholder="1234 5678 9012 3456" maxlength="19">
+      <div style="font-size:13px;color:var(--muted);margin-bottom:16px;line-height:1.7">
+        Stripe の安全な決済ページに移動します。<br>
+        カード情報は Stripe が直接処理するため、当サービスには保存されません。
       </div>
-      <div class="row2">
-        <div class="field">
-          <label>有効期限</label>
-          <input id="cardExp" placeholder="MM/YY" maxlength="5">
-        </div>
-        <div class="field">
-          <label>セキュリティコード</label>
-          <input id="cardCvc" placeholder="123" maxlength="4">
-        </div>
-      </div>
-      <button class="submit-btn card-pay" onclick="submitCard()">カードで申し込む</button>
-      <div class="secure">🔒 SSL暗号化通信で安全に処理されます</div>
+      <button class="submit-btn card-pay" id="stripeBtn" onclick="submitCard()">💳 Stripe で申し込む →</button>
+      <div class="secure">🔒 Stripe による PCI DSS 準拠の暗号化決済</div>
+      <div class="error-msg" id="cardErrMsg" style="margin-top:10px"></div>
     </div>
 
     <div class="bank-fields" id="bankSection">
@@ -221,13 +212,30 @@ body{background:var(--bg);color:var(--text);display:flex;align-items:center;just
 
   <div class="success-msg" id="successMsg">
     <div style="font-size:48px;margin-bottom:16px">✅</div>
-    <h2>お申し込みありがとうございます！</h2>
+    <h2 id="successTitle">お申し込みありがとうございます！</h2>
     <p style="color:var(--muted);font-size:14px;margin-bottom:20px" id="successDetail"></p>
     <a href="/" style="color:var(--accent);font-size:14px">トップに戻る</a>
   </div>
 </div>
 
 <script>
+/* Stripe Checkout 戻り処理 */
+(function(){
+  const p=new URLSearchParams(location.search);
+  const co=p.get('checkout');
+  if(co==='success'){
+    document.getElementById('formArea').style.display='none';
+    const s=document.getElementById('successMsg');
+    s.style.display='block';
+    document.getElementById('successTitle').textContent='お申し込みありがとうございます！';
+    document.getElementById('successDetail').textContent=
+      'カード決済が完了しました。\nアカウント情報をご登録のメールアドレスにお送りします。\n（数分かかる場合があります）';
+  }else if(co==='canceled'){
+    document.getElementById('errorMsg').textContent='決済がキャンセルされました。もう一度お試しください。';
+    document.getElementById('errorMsg').style.display='block';
+  }
+})();
+
 function switchMethod(m){
   document.querySelectorAll('.method-tab').forEach(t=>t.classList.remove('active'));
   event.target.classList.add('active');
@@ -249,24 +257,39 @@ function validate(){
   return true;
 }
 
-function submitCard(){
+async function submitCard(){
   if(!validate()) return;
-  const num=document.getElementById('cardNum').value.trim();
-  const exp=document.getElementById('cardExp').value.trim();
-  const cvc=document.getElementById('cardCvc').value.trim();
-  const err=document.getElementById('errorMsg');
-  if(!num||!exp||!cvc){
-    err.textContent='カード情報を全て入力してください';
-    err.style.display='block';
-    return;
+  const btn=document.getElementById('stripeBtn');
+  const err=document.getElementById('cardErrMsg');
+  btn.disabled=true; btn.textContent='Stripeへ移動中...';
+  err.style.display='none';
+  try{
+    const r=await fetch('/signup/stripe',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        shop_name: document.getElementById('shopName').value.trim(),
+        contact_name: document.getElementById('contactName').value.trim(),
+        contact_phone: document.getElementById('contactPhone').value.trim(),
+        contact_email: document.getElementById('contactEmail').value.trim(),
+        plan: 'monthly',
+        base_url: window.location.origin,
+      })
+    });
+    if(!r.ok){
+      const t=await r.text();
+      let msg='エラーが発生しました';
+      try{msg=JSON.parse(t).detail||msg;}catch{}
+      err.textContent=msg; err.style.display='block';
+      return;
+    }
+    const d=await r.json();
+    if(d.checkout_url) window.location.href=d.checkout_url;
+  }catch(e){
+    err.textContent='ネットワークエラー: '+e.message; err.style.display='block';
+  }finally{
+    btn.disabled=false; btn.textContent='💳 Stripe で申し込む →';
   }
-  // 実際のStripe決済はStripe.jsで処理
-  // ここではデモ表示
-  document.getElementById('formArea').style.display='none';
-  const s=document.getElementById('successMsg');
-  s.style.display='block';
-  document.getElementById('successDetail').textContent=
-    'クレジットカードでのお申し込みを受け付けました。\n確認メールをお送りしましたのでご確認ください。';
 }
 
 async function submitBank(){
@@ -300,19 +323,6 @@ async function submitBank(){
     btn.disabled=false; btn.textContent='振込で申し込む';
   }
 }
-
-// カード番号フォーマット
-document.getElementById('cardNum').addEventListener('input',function(e){
-  let v=e.target.value.replace(/\D/g,'');
-  v=v.replace(/(.{4})/g,'$1 ').trim();
-  e.target.value=v;
-});
-// 有効期限フォーマット
-document.getElementById('cardExp').addEventListener('input',function(e){
-  let v=e.target.value.replace(/\D/g,'');
-  if(v.length>=2) v=v.slice(0,2)+'/'+v.slice(2);
-  e.target.value=v;
-});
 </script>
 </body>
 </html>""")
