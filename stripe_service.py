@@ -306,6 +306,18 @@ async def stripe_webhook(request: Request):
             if items:
                 plan_name = items[0].get("price", {}).get("nickname", "")
 
+            # store_id がメタデータにない場合は stripe_customer_id / stripe_sub_id で逆引き
+            if not store_id:
+                cid = obj.get("customer", "")
+                sid = obj.get("id", "")
+                found = (
+                    (db.query(StripeSubscription).filter_by(stripe_customer_id=cid).first() if cid else None)
+                    or
+                    (db.query(StripeSubscription).filter_by(stripe_sub_id=sid).first() if sid else None)
+                )
+                if found:
+                    store_id = found.store_id
+
             if store_id:
                 sub = db.query(StripeSubscription).filter_by(store_id=store_id).first()
                 if not sub:
@@ -314,11 +326,12 @@ async def stripe_webhook(request: Request):
                 sub.stripe_customer_id = obj.get("customer", "")
                 sub.stripe_sub_id      = obj.get("id", "")
                 sub.status             = sub_status
-                sub.plan_name          = plan_name
+                sub.plan_name          = plan_name or sub.plan_name or ""
                 sub.current_period_end = period_dt
                 sub.cancel_at_end      = bool(obj.get("cancel_at_period_end", False))
                 sub.updated_at         = datetime.utcnow()
                 db.commit()
+                print(f"[stripe] subscription {ev_type} store_id={store_id} status={sub_status} period_end={period_dt}")
 
         return {"received": True}
     finally:
@@ -383,10 +396,19 @@ def create_stripe_signup(payload: SignupForStripeIn):
             line_items=[{"price": price_id, "quantity": 1}],
             success_url=f"{base}/signup?checkout=success&sid={signup.id}",
             cancel_url=f"{base}/signup?checkout=canceled",
+            # checkout.session.completed で使うメタデータ
             metadata={
                 "signup_id": str(signup.id),
                 "shop_name": payload.shop_name.strip(),
                 "plan": payload.plan,
+            },
+            # customer.subscription.* イベントにも signup_id を引き継ぐ
+            subscription_data={
+                "metadata": {
+                    "signup_id": str(signup.id),
+                    "store_id": str(signup.id),   # store_id = signup_id
+                    "plan": payload.plan,
+                }
             },
         )
         return {"checkout_url": session.url}
