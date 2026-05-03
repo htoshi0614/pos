@@ -2403,7 +2403,7 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
     <a href="/ui/tabs" target="_blank" style="color:#ef4444;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #ef444444;text-decoration:none">伝票</a>
     <a href="/ui/pricing" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">料金</a>
     <a href="/ui/salary" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">給与</a>
-    <a href="/ui/backup" target="_blank" style="color:#64748b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #64748b44;text-decoration:none">DB</a>
+    <a href="/ui/backup" target="_blank" id="backupNavLink" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">💾 バックアップ<span id="backupDot" style="margin-left:3px;font-size:9px;vertical-align:middle;color:#64748b" title="バックアップ状態確認中...">●</span></a>
     <a href="/ui/audit" target="_blank" style="color:#64748b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #64748b44;text-decoration:none">監査</a>
     <a href="/ui/weather" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">天気</a>
     <a href="/ui/mail" target="_blank" style="color:#f59e0b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #f59e0b44;text-decoration:none">メール</a>
@@ -2429,7 +2429,7 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
   <a href="/ui/tabs" style="color:#ef4444" class="admin-link">📝 伝票</a>
   <a href="/ui/pricing" style="color:#0ea5e9" class="admin-link">💰 料金</a>
   <a href="/ui/salary" style="color:#0ea5e9" class="admin-link">💵 給与</a>
-  <a href="/ui/backup" style="color:#64748b" class="admin-link">💾 DB</a>
+  <a href="/ui/backup" style="color:#0ea5e9" class="admin-link">💾 バックアップ</a>
   <a href="/ui/audit" style="color:#64748b" class="admin-link">🔍 監査</a>
   <a href="/ui/weather" style="color:#0ea5e9">🌤 天気</a>
   <a href="/ui/mail" style="color:#f59e0b" class="admin-link">📧 メール</a>
@@ -2679,6 +2679,28 @@ function updateAdminNav(){
   }
   nav.style.display=(r==='owner'||r==='manager')?'flex':'none';
 }
+/* バックアップ稼働状態を取得してドット表示を更新 */
+async function loadBackupStatus(){
+  const dot=$('backupDot');
+  if(!dot)return;
+  try{
+    const r=await api('/backup/auto/status');
+    if(!r)return;
+    if(r.running){
+      dot.style.color='#22c55e';
+      dot.title=`自動バックアップ稼働中（${r.interval_minutes}分ごと）`;
+    }else{
+      dot.style.color='#ef4444';
+      dot.title='自動バックアップ停止中 — バックアップ画面から開始できます';
+    }
+    /* 最新バックアップ時刻も取得して title に追記 */
+    const bl=await api('/backup/list');
+    if(bl&&bl.length>0){
+      const last=bl[0];
+      dot.title+=' | 最終: '+last.created;
+    }
+  }catch(e){}
+}
 document.addEventListener('DOMContentLoaded',()=>{
   updateAdminNav();
   $('role')?.addEventListener('change', updateAdminNav);
@@ -2696,6 +2718,9 @@ document.addEventListener('DOMContentLoaded',()=>{
     /* ナビドロワーの管理リンクも非表示 */
     document.querySelectorAll('.admin-link').forEach(a=>a.style.display='none');
   }
+  /* バックアップ状態を初回ロード＋5分ごとに更新 */
+  loadBackupStatus();
+  setInterval(loadBackupStatus, 5*60*1000);
 });
 
 let selectedTableId = null;
