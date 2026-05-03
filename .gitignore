@@ -7,6 +7,9 @@ pos.db
 *.log
 logs/
 backup/
+backups/
 .DS_Store
 Thumbs.db
 .vscode/
+.claude/
+.pos_credentials
