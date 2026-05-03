@@ -58,12 +58,31 @@ def _list_backups():
 
 def _auto_backup_loop():
     global _auto_backup_running
+    # 起動直後に1回バックアップ
+    time.sleep(10)
+    try:
+        name = _create_backup("startup")
+        print(f"[backup] 起動時バックアップ完了: {name}")
+    except Exception as e:
+        print(f"[backup] 起動時バックアップ失敗: {e}")
+    # 以降は定期実行
     while _auto_backup_running:
+        time.sleep(_auto_backup_interval)
         try:
-            _create_backup("auto")
+            name = _create_backup("auto")
+            print(f"[backup] 自動バックアップ完了: {name}")
         except Exception as e:
             print(f"[backup] auto-backup error: {e}")
-        time.sleep(_auto_backup_interval)
+
+def start_auto_backup_on_startup(interval_minutes: int = 360):
+    """サーバー起動時に自動バックアップを開始する（pos.py の startup イベントから呼ぶ）"""
+    global _auto_backup_running, _auto_backup_interval
+    if _auto_backup_running:
+        return  # すでに起動中
+    _auto_backup_interval = max(10, interval_minutes) * 60
+    _auto_backup_running = True
+    t = threading.Thread(target=_auto_backup_loop, daemon=True)
+    t.start()
 
 # ---------- API ----------
 @router.post("/backup/create")
@@ -157,14 +176,17 @@ input{font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--l
 </style></head><body>
 <h1>💾 バックアップ管理</h1>
 <div class="auto-status">
-  <span>自動バックアップ: <span id="autoStatus" class="badge off">OFF</span></span>
-  <input id="interval" type="number" value="60" style="width:80px" placeholder="分">
-  <button class="btn green" onclick="startAuto()">開始</button>
-  <button class="btn" onclick="stopAuto()">停止</button>
+  <span>状態: <span id="autoStatus" class="badge off">確認中...</span></span>
+  <span style="color:var(--muted);font-size:13px">保存件数: <strong id="countBadge">—</strong></span>
+  <input id="interval" type="number" value="360" style="width:72px" placeholder="分">
+  <span style="font-size:12px;color:var(--muted)">分間隔</span>
+  <button class="btn green" onclick="startAuto()">自動ON</button>
+  <button class="btn" onclick="stopAuto()">自動OFF</button>
   <a href="/ui" style="margin-left:auto;font-size:13px">← POS に戻る</a>
 </div>
 <div class="toolbar">
   <button class="btn solid" onclick="manualBackup()">今すぐバックアップ</button>
+  <span style="font-size:12px;color:var(--muted)">※ backups/ フォルダに保存、最大30件保持</span>
 </div>
 <table>
 <thead><tr><th>ファイル名</th><th>サイズ</th><th>作成日時</th><th>操作</th></tr></thead>
@@ -172,41 +194,61 @@ input{font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--l
 </table>
 
 <script>
-const H={'Content-Type':'application/json','X-Role':'owner'};
+const H=()=>({'Content-Type':'application/json','X-Role':'owner','X-Token':sessionStorage.getItem('pos_token')||''});
+async function apiFetch(path,opt={}){
+  const r=await fetch(path,{headers:H(),...opt});
+  if(r.status===401){sessionStorage.clear();location.href='/';return null;}
+  return r;
+}
 async function load(){
-  const r=await fetch('/backup/list',{headers:H}); const data=await r.json();
-  document.getElementById('list').innerHTML=data.map(b=>`<tr>
-    <td>${b.name}</td><td>${b.size_mb} MB</td><td>${b.created}</td>
-    <td>
-      <a href="/backup/download/${b.name}" class="btn" style="font-size:12px;padding:4px 8px">DL</a>
-      <button class="btn" style="font-size:12px;padding:4px 8px" onclick="restore('${b.name}')">復元</button>
+  const r=await apiFetch('/backup/list'); if(!r)return;
+  const data=await r.json();
+  const count=data.length;
+  document.getElementById('countBadge').textContent=count+'件';
+  document.getElementById('list').innerHTML=count===0
+    ?'<tr><td colspan="4" style="text-align:center;color:#64748b;padding:20px">バックアップがありません</td></tr>'
+    :data.map(b=>`<tr>
+    <td style="font-size:12px;font-family:monospace">${b.name}</td><td>${b.size_mb} MB</td><td>${b.created}</td>
+    <td style="display:flex;gap:6px;flex-wrap:wrap">
+      <a href="/backup/download/${b.name}" class="btn" style="font-size:12px;padding:4px 8px;text-decoration:none;background:#14532d;border-color:#22c55e;color:#4ade80">⬇ DL</a>
+      <button class="btn" style="font-size:12px;padding:4px 8px" onclick="restore('${b.name}')">↩ 復元</button>
       <button class="btn danger" style="font-size:12px;padding:4px 8px" onclick="del('${b.name}')">削除</button>
     </td></tr>`).join('');
 }
 async function loadStatus(){
-  const r=await fetch('/backup/auto/status',{headers:H}); const d=await r.json();
+  const r=await apiFetch('/backup/auto/status'); if(!r)return;
+  const d=await r.json();
   const el=document.getElementById('autoStatus');
-  el.textContent=d.running?`ON (${d.interval_minutes}分間隔)`:'OFF';
+  el.textContent=d.running?`自動ON (${d.interval_minutes}分間隔)`:'自動OFF';
   el.className='badge '+(d.running?'on':'off');
+  if(d.running) document.getElementById('interval').value=d.interval_minutes;
 }
 async function manualBackup(){
-  await fetch('/backup/create',{method:'POST',headers:H}); load();
+  const btn=document.querySelector('.btn.solid');
+  btn.disabled=true; btn.textContent='バックアップ中...';
+  try{
+    const r=await apiFetch('/backup/create',{method:'POST'}); if(!r)return;
+    const d=await r.json();
+    if(d.ok) alert('✅ バックアップ完了: '+d.name);
+    load();
+  }finally{btn.disabled=false;btn.textContent='今すぐバックアップ';}
 }
 async function startAuto(){
-  const m=parseInt(document.getElementById('interval').value)||60;
-  await fetch(`/backup/auto/start?interval_minutes=${m}`,{method:'POST',headers:H}); loadStatus();
+  const m=parseInt(document.getElementById('interval').value)||360;
+  await apiFetch(`/backup/auto/start?interval_minutes=${m}`,{method:'POST'}); loadStatus();
 }
 async function stopAuto(){
-  await fetch('/backup/auto/stop',{method:'POST',headers:H}); loadStatus();
+  await apiFetch('/backup/auto/stop',{method:'POST'}); loadStatus();
 }
 async function restore(name){
-  if(!confirm('このバックアップからDBを復元しますか？\\n現在のデータは事前にバックアップされます。'))return;
-  const r=await fetch(`/backup/restore/${name}`,{method:'POST',headers:H}); const d=await r.json();
-  alert(d.message||'復元完了'); load();
+  if(!confirm('【'+name+'】\nこのバックアップからDBを復元しますか？\n※現在のデータは事前にバックアップされます。'))return;
+  const r=await apiFetch(`/backup/restore/${name}`,{method:'POST'}); if(!r)return;
+  const d=await r.json();
+  alert(d.message||'復元完了。サーバーを再起動してください。'); load();
 }
 async function del(name){
-  if(!confirm('削除しますか？'))return;
-  await fetch(`/backup/${name}`,{method:'DELETE',headers:H}); load();
+  if(!confirm(name+' を削除しますか？'))return;
+  await apiFetch(`/backup/${name}`,{method:'DELETE'}); load();
 }
 load(); loadStatus();
 </script></body></html>""")

@@ -503,6 +503,13 @@ _main_loop: Optional[asyncio.AbstractEventLoop] = None
 async def _capture_main_loop():
     global _main_loop
     _main_loop = asyncio.get_running_loop()
+    # 自動バックアップをサーバー起動時に開始（6時間間隔）
+    try:
+        from backup_service import start_auto_backup_on_startup
+        start_auto_backup_on_startup(interval_minutes=360)
+        print("[backup] 自動バックアップ開始（6時間間隔）")
+    except Exception as _be:
+        print(f"[backup] 自動バックアップ起動失敗: {_be}")
 
 async def notify_clients(event: str, data: dict = None):
     """全端末にイベントを通知"""
