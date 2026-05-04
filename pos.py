@@ -1217,6 +1217,12 @@ def compute_bill(db, s: Session) -> Dict:
         "order_subtotal": order_subtotal,
         "nomination_fee": float(nomination_fee),
         "nominations": nomination_breakdown,
+        "nomi_tags": [
+            {"prefix": {"hon":"A","jyonai":"B","dohan":"D"}.get(n.nomi_type,"?"),
+             "cast_name": n.cast.name if n.cast else "?",
+             "nomi_type": n.nomi_type}
+            for n in s.nominations
+        ],
         "discount_label": discount_label,
         "discount_type": discount_type,
         "discount_amount": float(discount_amount),
@@ -2268,6 +2274,7 @@ select,input{font-size:16px;padding:8px 10px;border-radius:10px;border:1px solid
 .table .name{font-size:18px;font-weight:700}
 .table .small{font-size:12px;opacity:.9}
 .table .ttime{font-size:14px;font-weight:700;margin-top:4px}
+.table .tnomi{font-size:10px;margin-top:2px;opacity:.95;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.3px}
 .table.t-free{background:var(--table-free);color:#111827}
 .table.t-ok{background:var(--t-ok);color:var(--ink)}
 .table.t-warn{background:var(--t-warn);color:#1f2937}
@@ -2869,11 +2876,14 @@ async function loadFloor(){
       const remain=booked-elapsed;
       const guests=b?(b.guest_count||1):1;
       const total=b?Math.round(b.total||0):0;
+      const nomiText=nomiTagsText(b);
       center=`<div class="ttime mono" id="ttime-${t.id}">${remain>=0?`残り ${remain}分`:`超過 ${Math.abs(remain)}分`}</div>
-              <div class="small mono" id="tdetail-${t.id}">${guests}名 ¥${total.toLocaleString()}</div>`;
+              <div class="small mono" id="tdetail-${t.id}">${guests}名 ¥${total.toLocaleString()}</div>
+              <div class="tnomi" id="tnomi-${t.id}">${nomiText}</div>`;
       el.className='table '+colorClass(remain,b);
     }
-    el.innerHTML=`<div class="name">${t.name}</div>${center}`;
+    el.innerHTML=`<div class="name">${t.name}</div>${center}`
+      + (s ? '' : `<div class="tnomi" id="tnomi-${t.id}"></div>`);
 
     el.addEventListener('click', async ()=>{
       selectedTableId=t.id;
@@ -2903,6 +2913,12 @@ async function loadFloor(){
   }
 }
 
+/* 指名タグを "D:ゆかり　A:なな" 形式の文字列に変換 */
+function nomiTagsText(b){
+  if(!b||!b.nomi_tags||!b.nomi_tags.length) return '';
+  return b.nomi_tags.map(n=>`${n.prefix}:${n.cast_name}`).join('　');
+}
+
 /* 毎秒更新（卓カード） */
 function floorTick(){
   Object.entries(floorModel.sessionByTable).forEach(([tid,sid])=>{
@@ -2910,11 +2926,12 @@ function floorTick(){
     const elapsed=liveElapsed(b.elapsed_minutes ?? b?.time_breakdown?.total_minutes ?? 0, b._fetchedAt);
     const booked=b.booked_minutes ?? 60;
     const remain=booked-elapsed;
-    const tt=$('ttime-'+tid), td=$('tdetail-'+tid);
+    const tt=$('ttime-'+tid), td=$('tdetail-'+tid), tn=$('tnomi-'+tid);
     const guests=b.guest_count||1;
     const total=Math.round(b.total||0);
     if(tt) tt.textContent= remain>=0?`残り ${remain}分`:`超過 ${Math.abs(remain)}分`;
     if(td) td.textContent= `${guests}名 ¥${total.toLocaleString()}`;
+    if(tn) tn.textContent= nomiTagsText(b);
     el.classList.remove('t-free','t-ok','t-warn','t-over','t-paid');
     el.classList.add(colorClass(remain,b));
   });
@@ -3220,7 +3237,7 @@ async function recordNomination(nomiType){
   try{
     await api(`/sessions/${currentSessionId}/nominations`, {method:'POST', body:{cast_id: castId, nomi_type: nomiType}});
     toast(`${label}: ${cast.name}`, `セッション ${currentSessionId} に${label}を登録しました`, 'ok');
-    await refreshBill();
+    await refreshBill(); await loadFloor();
   }catch(e){
     toast(`${label}登録エラー`, e.message||'登録に失敗しました','err');
   }
@@ -3400,7 +3417,7 @@ function connectWS(){
       try{
         const msg=JSON.parse(ev.data);
         // 他端末からの変更通知 → 売上&フロアを即時更新
-        if(['order','cancel_order','payment','checkout','cancel_session','extend','checkin','guest_count','move_table','start_time','douhan'].includes(msg.event)){
+        if(['order','cancel_order','payment','checkout','cancel_session','extend','checkin','guest_count','move_table','start_time','douhan','nomination'].includes(msg.event)){
           refreshSales();
           loadFloor();
           if(currentSessionId) refreshBill();
