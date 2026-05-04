@@ -22,7 +22,7 @@ class CastSalaryConfig(Base):
     cast_id              = Column(Integer, ForeignKey("casts.id"), unique=True)
     store_id             = Column(Integer, ForeignKey("stores.id"))
     hourly_rate          = Column(Float, default=0.0)   # 時給
-    floor_rate           = Column(Float, default=0.0)   # 場内率 (e.g. 0.10 = 10%)
+    floor_rate           = Column(Float, default=0.0)   # 場内バック固定額（円/件、0=バックなし）
     drink_back_rate      = Column(Float, default=0.0)   # ドリンクバック率
     bottle_back_rate     = Column(Float, default=0.0)   # ボトルバック率（サービス料抜き小計に対する率）
     nom_fee_hon          = Column(Float, default=0.0)   # 本指名料
@@ -101,7 +101,7 @@ def compute_cast_salary(db, store_id: int, year: int, month: int) -> List[dict]:
                     hours_worked += (a.clock_out - a.clock_in).total_seconds() / 3600
 
         hourly_rate  = cfg.hourly_rate       if cfg else 0.0
-        floor_rate   = cfg.floor_rate        if cfg else 0.0
+        jyonai_back  = cfg.floor_rate         if cfg else 0.0   # 場内指名1件あたり固定バック額（円）
         db_rate      = cfg.drink_back_rate   if cfg else 0.0
         nom_hon      = cfg.nom_fee_hon       if cfg else 0.0
         nom_jyonai   = cfg.nom_fee_jyonai   if cfg else 0.0
@@ -137,10 +137,8 @@ def compute_cast_salary(db, store_id: int, year: int, month: int) -> List[dict]:
                 elif t == "jyonai": nom_pay += nom_jyonai
                 elif t == "dohan":  nom_pay += nom_dohan
 
-        # 場内料（売上に対する率）— 簡易: OrderのDBから計算
-        floor_pay = 0.0
-        # (簡易実装: session nomination fee × floor_rate)
-        floor_pay = nom_pay * floor_rate
+        # 場内バック（場内指名1件あたり固定額 × 件数、0=バックなし）
+        floor_pay = nom_count["jyonai"] * jyonai_back
 
         total = time_pay + drink_back_total + bottle_back_total + nom_pay + floor_pay
 
@@ -504,7 +502,7 @@ td.num{text-align:right;font-family:monospace}
     <h2>給与設定（キャスト別）</h2>
     <table>
       <thead><tr>
-        <th>名前</th><th>時給</th><th>場内率</th><th>ドリンクバック率</th><th>ボトルバック率</th>
+        <th>名前</th><th>時給</th><th>場内バック/件</th><th>ドリンクバック率</th><th>ボトルバック率</th>
         <th>本指名</th><th>場内指名</th><th>同伴</th><th></th>
       </tr></thead>
       <tbody id="configBody"></tbody>
@@ -579,7 +577,7 @@ async function loadConfigs(){
       const tr=document.createElement('tr');
       tr.innerHTML=`<td><b>${d.cast_name}</b></td>
         <td class="num">¥${(c.hourly_rate||0).toLocaleString()}</td>
-        <td class="num">${((c.floor_rate||0)*100).toFixed(0)}%</td>
+        <td class="num">¥${(c.floor_rate||0).toLocaleString()}</td>
         <td class="num">${((c.drink_back_rate||0)*100).toFixed(0)}%</td>
         <td class="num">${((c.bottle_back_rate||0)*100).toFixed(0)}%</td>
         <td class="num">¥${(c.nom_fee_hon||0).toLocaleString()}</td>
@@ -599,7 +597,7 @@ function openEdit(castId, cfg){
   div.id='editForm'; div.className='edit-form'; div.style.display='block';
   div.innerHTML=`<div class="grid3">
     <label>時給 <input id="e_hr" type="number" value="${cfg.hourly_rate||0}"></label>
-    <label>場内率（0.1=10%）<input id="e_fr" type="number" step="0.01" value="${cfg.floor_rate||0}"></label>
+    <label>場内バック（円/件、0=バックなし）<input id="e_fr" type="number" step="1" min="0" value="${cfg.floor_rate||0}"></label>
     <label>ドリンクバック率 <input id="e_db" type="number" step="0.01" value="${cfg.drink_back_rate||0}"></label>
     <label>ボトルバック率 <input id="e_bb" type="number" step="0.01" value="${cfg.bottle_back_rate||0}"></label>
     <label>本指名料 <input id="e_nh" type="number" value="${cfg.nom_fee_hon||0}"></label>
