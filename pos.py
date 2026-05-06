@@ -152,7 +152,7 @@ body{background:var(--bg);color:var(--text);display:flex;align-items:center;just
 
     <div class="plan-summary">
       <div class="name">スタンダードプラン（月額）</div>
-      <div class="price">¥80,000<span> /月（税込）</span></div>
+      <div class="price">¥50,000<span> /月（税込）</span></div>
     </div>
 
     <div class="field">
@@ -197,7 +197,7 @@ body{background:var(--bg);color:var(--text);display:flex;align-items:center;just
         普通 1234567<br>
         カ）ポススタート<br><br>
         <div class="label">お振込金額</div>
-        <strong>¥80,000（税込）</strong><br><br>
+        <strong>¥50,000（税込）</strong><br><br>
         <div style="font-size:12px;color:var(--muted)">
           ※ お振込確認後、1営業日以内にアカウントを有効化いたします。<br>
           ※ 振込手数料はお客様負担となります。
@@ -393,7 +393,7 @@ body{background:var(--bg);color:var(--text);display:flex;align-items:center;just
   <div class="card">
     <h2><span class="icon">💳</span>ご利用プラン</h2>
     <div class="plan-box">
-      <div class="plan-price">¥80,000<span> /月（税込）</span></div>
+      <div class="plan-price">¥50,000<span> /月（税込）</span></div>
       <ul class="plan-detail">
         <li>全機能利用可能</li>
         <li>複数端末対応（リアルタイム同期）</li>
@@ -443,7 +443,7 @@ function payStripe(){
   window.location.href='/signup';
 }
 function payBank(){
-  alert('口座振込のご案内をメールでお送りします。\n\n振込先:\n三菱UFJ銀行 ○○支店\n普通 1234567\nカ）ポススタート\n\n月額: ¥80,000（税込）\n\nお振込確認後、アカウントを有効化いたします。');
+  alert('口座振込のご案内をメールでお送りします。\n\n振込先:\n三菱UFJ銀行 ○○支店\n普通 1234567\nカ）ポススタート\n\n月額: ¥50,000（税込）\n\nお振込確認後、アカウントを有効化いたします。');
 }
 function toggleVendor(){
   const f=document.getElementById('vendorForm');
