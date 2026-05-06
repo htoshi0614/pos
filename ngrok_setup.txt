@@ -1,0 +1,53 @@
+========================================
+ngrok 無料スタティックドメイン設定手順
+========================================
+
+ngrokの無料プランで「永続URL」を1個もらえます。
+設定すると毎回同じURLでデモを見せられます。
+
+■ 手順
+
+① ngrokアカウントにログイン
+   https://dashboard.ngrok.com/
+
+② 左メニュー「Domains」→「+ New Domain」
+   → 無料の固定ドメインが発行されます
+   例: abc-def-123.ngrok-free.app
+
+③ 認証トークンを設定（初回のみ）
+   コマンドプロンプトで:
+   ngrok config add-authtoken <あなたのトークン>
+   ※ トークンは https://dashboard.ngrok.com/get-started/your-authtoken
+
+④ start_demo.bat を開いてドメインを設定
+   メモ帳で開いて以下の行を書き換える:
+
+   変更前: set NGROK_DOMAIN=
+   変更後: set NGROK_DOMAIN=abc-def-123.ngrok-free.app
+            ↑ ②で取得したドメイン名に変える
+
+⑤ start_demo.bat をダブルクリックで起動
+   → https://abc-def-123.ngrok-free.app で誰でもアクセスできます
+
+■ ngrokが見つからない場合
+
+コマンドプロンプトで "ngrok" と打ってエラーが出る場合:
+  → start_demo.bat の以下の行を ngrok.exe のフルパスに変更
+
+  変更前: set NGROK_CMD=ngrok
+  変更後: set NGROK_CMD=C:\Users\htosh\Downloads\ngrok.exe
+           ↑ ngrok.exe があるパスに変える
+
+■ デモURL の共有方法（営業用）
+
+  以下のメッセージをコピーして送るだけ:
+  ────────────────────────────────────────
+  【POSStart デモ環境】
+  URL: https://abc-def-123.ngrok-free.app
+  PW:  posstart2024
+
+  テーブルを開いて注文・指名・会計など
+  実際の操作を自由にお試しください。
+  ────────────────────────────────────────
+
+========================================
