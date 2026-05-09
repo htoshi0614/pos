@@ -260,7 +260,8 @@ async def stripe_webhook(request: Request):
 
         # ── checkout.session.completed: 新規申し込みのカード決済完了 ──
         if ev_type == "checkout.session.completed":
-            signup_id = int(meta.get("signup_id", 0))
+            # Payment Linkの場合は client_reference_id、API作成の場合は metadata.signup_id
+            signup_id = int(obj.get("client_reference_id") or meta.get("signup_id", 0) or 0)
             customer_id = obj.get("customer", "")
             stripe_sub_id = obj.get("subscription", "")
             plan_label = meta.get("plan", "monthly")
@@ -349,33 +350,23 @@ class SignupForStripeIn(BaseModel):
     plan: str = "monthly"   # monthly / yearly
     base_url: str = ""
 
+# Stripe Payment Link（固定URL・¥50,000/月）
+# このURLは公開してOK（Stripeがホストする決済ページ）
+PAYMENT_LINK_URL = os.environ.get(
+    "STRIPE_PAYMENT_LINK_URL",
+    "https://buy.stripe.com/3cIcMY5vA4nKfT82KN2sM01"
+)
+
 @router.post("/signup/stripe")
 def create_stripe_signup(payload: SignupForStripeIn):
-    """新規申し込みのStripe Checkout作成（認証不要・公開エンドポイント）"""
+    """新規申し込み: 申込情報をDBに保存しPayment LinkへリダイレクトするURLを返す
+    （Stripe APIを呼ばないので、Secret Keyが無くても動作する）"""
     if not payload.shop_name.strip() or not payload.contact_name.strip() or not payload.contact_email.strip():
         raise HTTPException(400, "店舗名・担当者名・メールアドレスは必須です")
 
-    try:
-        import stripe as _stripe
-    except ImportError:
-        raise HTTPException(500, "stripe ライブラリが未インストールです（pip install stripe）")
-
     db = SessionLocal()
     try:
-        cfg = db.query(StripeConfig).first()
-        key = (cfg.secret_key if cfg else "") or os.environ.get("STRIPE_SECRET_KEY", "")
-        if not key:
-            raise HTTPException(400, "Stripe設定が未完了です。管理者にお問い合わせください。")
-
-        _stripe.api_key = key
-        price_id = ""
-        if cfg:
-            price_id = cfg.price_id_monthly if payload.plan == "monthly" else (cfg.price_id_yearly or cfg.price_id_monthly)
-        price_id = price_id or os.environ.get("STRIPE_PRICE_ID_MONTHLY", "price_1TV6uo2MxG8VbLpzjxpsLOYK")
-        if not price_id:
-            raise HTTPException(400, "Price IDが未設定です。管理者にお問い合わせください。")
-
-        # 申し込み情報を保存（BankSignupを流用、noteにstripe識別子を付与）
+        # 申し込み情報を保存
         signup = BankSignup(
             shop_name=payload.shop_name.strip(),
             contact_name=payload.contact_name.strip(),
@@ -388,32 +379,17 @@ def create_stripe_signup(payload: SignupForStripeIn):
         db.commit()
         db.refresh(signup)
 
-        base = payload.base_url or os.environ.get("BASE_URL", "http://localhost:8000")
-        session = _stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            mode="subscription",
-            customer_email=payload.contact_email.strip(),
-            line_items=[{"price": price_id, "quantity": 1}],
-            success_url=f"{base}/signup?checkout=success&sid={signup.id}",
-            cancel_url=f"{base}/signup?checkout=canceled",
-            # checkout.session.completed で使うメタデータ
-            metadata={
-                "signup_id": str(signup.id),
-                "shop_name": payload.shop_name.strip(),
-                "plan": payload.plan,
-            },
-            # customer.subscription.* イベントにも signup_id を引き継ぐ
-            subscription_data={
-                "metadata": {
-                    "signup_id": str(signup.id),
-                    "store_id": str(signup.id),   # store_id = signup_id
-                    "plan": payload.plan,
-                }
-            },
+        # Stripe Payment Link にパラメータを付けてリダイレクト
+        # client_reference_id でwebhook時にこのsignupと紐付けできる
+        from urllib.parse import quote
+        url = (
+            f"{PAYMENT_LINK_URL}"
+            f"?client_reference_id={signup.id}"
+            f"&prefilled_email={quote(payload.contact_email.strip())}"
         )
-        return {"checkout_url": session.url}
+        return {"checkout_url": url}
     except Exception as e:
-        raise HTTPException(400, f"Stripe エラー: {str(e)}")
+        raise HTTPException(400, f"申し込みエラー: {str(e)}")
     finally:
         db.close()
 
