@@ -16,3 +16,9 @@ Thumbs.db
 ngrok.exe
 ngrok.zip
 *.zip
+
+# PyInstaller / Inno Setup ビルド成果物
+build/build/
+build/dist/
+build/output/
+*.spec.bak
