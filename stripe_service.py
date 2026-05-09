@@ -791,8 +791,8 @@ details > div{padding:0 18px 18px}
       <h3 style="margin:0 0 16px;font-size:17px">🏦 銀行振込のご案内</h3>
       <div style="font-size:14px;line-height:1.8;background:#0a1423;border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px">
         <div style="font-size:11px;color:var(--muted);margin-bottom:4px">お振込先</div>
-        <div>三菱UFJ銀行 ○○支店</div>
-        <div>普通 1234567</div>
+        <div>GMOあおぞらネット銀行 うみ支店</div>
+        <div>普通 3234569</div>
         <div>カ）ポススタート</div>
         <div style="margin-top:10px;font-size:11px;color:var(--muted)">月額</div>
         <div style="font-weight:700">¥50,000（税込）</div>

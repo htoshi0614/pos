@@ -193,8 +193,8 @@ body{background:var(--bg);color:var(--text);display:flex;align-items:center;just
     <div class="bank-fields" id="bankSection">
       <div class="bank-info">
         <div class="label">振込先</div>
-        <strong>三菱UFJ銀行 ○○支店</strong><br>
-        普通 1234567<br>
+        <strong>GMOあおぞらネット銀行 うみ支店</strong><br>
+        普通 3234569<br>
         カ）ポススタート<br><br>
         <div class="label">お振込金額</div>
         <strong>¥50,000（税込）</strong><br><br>
@@ -443,7 +443,7 @@ function payStripe(){
   window.location.href='/signup';
 }
 function payBank(){
-  alert('口座振込のご案内をメールでお送りします。\n\n振込先:\n三菱UFJ銀行 ○○支店\n普通 1234567\nカ）ポススタート\n\n月額: ¥50,000（税込）\n\nお振込確認後、アカウントを有効化いたします。');
+  alert('口座振込のご案内をメールでお送りします。\n\n振込先:\nGMOあおぞらネット銀行 うみ支店\n普通 3234569\nカ）ポススタート\n\n月額: ¥50,000（税込）\n\nお振込確認後、アカウントを有効化いたします。');
 }
 function toggleVendor(){
   const f=document.getElementById('vendorForm');
