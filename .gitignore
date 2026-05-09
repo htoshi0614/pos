@@ -13,3 +13,6 @@ Thumbs.db
 .vscode/
 .claude/
 .pos_credentials
+ngrok.exe
+ngrok.zip
+*.zip

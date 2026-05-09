@@ -6,3 +6,4 @@ openpyxl
 stripe
 httpx
 python-multipart
+python-dotenv

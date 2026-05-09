@@ -371,7 +371,7 @@ def create_stripe_signup(payload: SignupForStripeIn):
         price_id = ""
         if cfg:
             price_id = cfg.price_id_monthly if payload.plan == "monthly" else (cfg.price_id_yearly or cfg.price_id_monthly)
-        price_id = price_id or os.environ.get("STRIPE_PRICE_ID_MONTHLY", "")
+        price_id = price_id or os.environ.get("STRIPE_PRICE_ID_MONTHLY", "price_1TV6uo2MxG8VbLpzjxpsLOYK")
         if not price_id:
             raise HTTPException(400, "Price IDが未設定です。管理者にお問い合わせください。")
 
