@@ -1291,12 +1291,25 @@ def delete_table(table_id: int, x_role: Optional[Role] = Header(None, alias="X-R
     finally:
         db.close()
 
-@app.get("/casts", response_model=List[CastOut])
+def _is_cast_on_duty(db, cast_id: int) -> bool:
+    """キャストが現在出勤中（出勤打刻あり、退勤打刻なし）かどうか判定"""
+    active = db.query(Attendance).filter_by(
+        person_type="cast", person_id=cast_id, clock_out=None
+    ).filter(Attendance.clock_in != None).first()
+    return active is not None
+
+@app.get("/casts")
 def list_casts(store_id: int, x_role: Optional[Role]=Header(None, alias="X-Role")):
     require_role(x_role, ["owner","manager","cashier","staff"])
     db = SessionLocal()
     try:
-        return db.query(Cast).filter_by(store_id=store_id, is_active=True).all()
+        casts = db.query(Cast).filter_by(store_id=store_id, is_active=True).all()
+        return [{
+            "id": c.id,
+            "store_id": c.store_id,
+            "name": c.name,
+            "is_on_duty": _is_cast_on_duty(db, c.id),
+        } for c in casts]
     finally:
         db.close()
 
@@ -1676,6 +1689,9 @@ def record_douhan(session_id: int, payload: dict, x_role: Optional[Role] = Heade
         cast = db.get(Cast, cast_id)
         if not cast:
             raise HTTPException(404, "Cast not found")
+        # 出勤中チェック（退勤中・未出勤のキャストは同伴登録不可）
+        if not _is_cast_on_duty(db, cast_id):
+            raise HTTPException(400, f"{cast.name} さんは現在退勤中（または未出勤）のため、同伴登録できません。先に出勤打刻をしてください。")
         # 既に同伴登録済みかチェック
         existing = db.query(Nomination).filter_by(session_id=session_id, nomi_type="dohan").first()
         if existing:
@@ -1727,6 +1743,9 @@ def add_nomination(session_id: int, payload: dict, x_role: Optional[Role] = Head
         cast = db.get(Cast, cast_id)
         if not cast:
             raise HTTPException(404, "Cast not found")
+        # 出勤中チェック（退勤中・未出勤のキャストは指名不可）
+        if not _is_cast_on_duty(db, cast_id):
+            raise HTTPException(400, f"{cast.name} さんは現在退勤中（または未出勤）のため、指名できません。先に出勤打刻をしてください。")
         # 同セッション内で同キャスト×同種別の重複チェック
         existing_nom = db.query(Nomination).filter_by(
             session_id=session_id, cast_id=cast_id, nomi_type=nomi_type
@@ -3226,13 +3245,18 @@ async function recordNomination(nomiType){
   if(!casts||!casts.length) return toast('キャストが登録されていません','err');
 
   const label = nomiType === 'hon' ? '本指名' : '場内指名';
-  const options = casts.map(c=>`${c.id}: ${c.name}`).join('\n');
-  const input = prompt(`${label}キャストを選択\n番号を入力してください:\n\n${options}`);
+  const options = casts.map(c=>`${c.id}: ${c.name}${c.is_on_duty===false ? ' ⛔退勤中' : ''}`).join('\n');
+  const input = prompt(`${label}キャストを選択\n番号を入力してください:\n（⛔退勤中のキャストは指名できません）\n\n${options}`);
   if(!input) return;
   const castId = parseInt(input.split(':')[0], 10);
   if(isNaN(castId)) return toast('正しい番号を入力してください','err');
   const cast = casts.find(c=>c.id===castId);
   if(!cast) return toast('該当するキャストが見つかりません','err');
+  // 退勤中チェック（フロントでも事前ブロック）
+  if(cast.is_on_duty === false){
+    alert(`⛔ ${cast.name} さんは退勤中のため指名できません。\n\n先に「出退勤」画面から出勤打刻をしてください。`);
+    return;
+  }
 
   try{
     await api(`/sessions/${currentSessionId}/nominations`, {method:'POST', body:{cast_id: castId, nomi_type: nomiType}});
@@ -3253,13 +3277,18 @@ async function recordDouhan(){
   if(!casts||!casts.length) return toast('キャストが登録されていません','err');
 
   // 選択ダイアログ生成
-  const options = casts.map(c=>`${c.id}: ${c.name}`).join('\n');
-  const input = prompt(`同伴キャストを選択\n番号を入力してください:\n\n${options}`);
+  const options = casts.map(c=>`${c.id}: ${c.name}${c.is_on_duty===false ? ' ⛔退勤中' : ''}`).join('\n');
+  const input = prompt(`同伴キャストを選択\n番号を入力してください:\n（⛔退勤中のキャストは登録できません）\n\n${options}`);
   if(!input) return;
   const castId = parseInt(input.split(':')[0], 10);
   if(isNaN(castId)) return toast('正しい番号を入力してください','err');
   const cast = casts.find(c=>c.id===castId);
   if(!cast) return toast('該当するキャストが見つかりません','err');
+  // 退勤中チェック
+  if(cast.is_on_duty === false){
+    alert(`⛔ ${cast.name} さんは退勤中のため同伴登録できません。\n\n先に「出退勤」画面から出勤打刻をしてください。`);
+    return;
+  }
 
   try{
     await api(`/sessions/${currentSessionId}/douhan`, {method:'POST', body:{cast_id: castId}});
