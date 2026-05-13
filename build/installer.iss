@@ -4,7 +4,7 @@
 ; ============================================================
 
 #define AppName        "POSStart"
-#define AppVersion     "1.0.0"
+#define AppVersion     "1.0.1"
 #define AppPublisher   "POSStart"
 #define AppURL         "https://github.com/htoshi0614/pos"
 #define AppExeName     "POSStart.exe"
