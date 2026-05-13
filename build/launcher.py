@@ -64,6 +64,41 @@ def open_browser_when_ready(port):
             return
         time.sleep(1)
 
+APP_VERSION = "1.0.1"
+UPDATE_INFO = {"available": False, "latest": "", "url": ""}
+
+def check_for_update():
+    """GitHub Latest Releaseを確認し、新バージョンがあればコンソールに通知"""
+    try:
+        import urllib.request, json
+        req = urllib.request.Request(
+            'https://api.github.com/repos/htoshi0614/pos/releases/latest',
+            headers={'Accept': 'application/vnd.github+json', 'User-Agent': f'POSStart/{APP_VERSION}'}
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = json.loads(r.read())
+        latest = (data.get('tag_name') or '').lstrip('v')
+        if latest and latest != APP_VERSION:
+            UPDATE_INFO['available'] = True
+            UPDATE_INFO['latest'] = latest
+            UPDATE_INFO['url'] = data.get('html_url', '')
+            # 環境変数に保存しておく（pos.pyから読める）
+            os.environ['POSSTART_UPDATE_AVAILABLE'] = '1'
+            os.environ['POSSTART_UPDATE_LATEST'] = latest
+            os.environ['POSSTART_UPDATE_URL'] = UPDATE_INFO['url']
+            print()
+            print('=' * 56)
+            print(f'  📢 新しいバージョン v{latest} がリリースされています！')
+            print(f'  現在のバージョン: v{APP_VERSION}')
+            print(f'  ダウンロード   : {UPDATE_INFO["url"]}')
+            print(f'  ※ 新インストーラーを実行するだけで上書き更新されます')
+            print(f'    （データは保持されます）')
+            print('=' * 56)
+            print()
+    except Exception:
+        # オフライン時・GitHub API障害時などは何もせずスキップ
+        pass
+
 def first_run_setup():
     """初回起動時のデータベースセットアップ"""
     db_path = os.path.join(APP_DIR, 'pos.db')
@@ -107,6 +142,9 @@ def main():
     print('=' * 56)
 
     first_run_setup()
+
+    # アップデート確認（別スレッドでバックグラウンド実行・サーバー起動を妨げない）
+    threading.Thread(target=check_for_update, daemon=True).start()
 
     # ブラウザ自動起動（別スレッド）
     threading.Thread(target=open_browser_when_ready, args=(PORT,), daemon=True).start()

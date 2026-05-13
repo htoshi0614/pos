@@ -70,6 +70,19 @@ def _record_attempt(ip: str):
         _login_attempts[ip] = []
     _login_attempts[ip].append(now)
 
+# ---------- バージョン情報・アップデート通知 ----------
+POSSTART_VERSION = "1.0.1"
+
+@app.get("/api/version")
+def api_version():
+    """現在のバージョン情報 + アップデート利用可否（launcher.py が環境変数経由で渡す）"""
+    return {
+        "current": POSSTART_VERSION,
+        "update_available": os.environ.get("POSSTART_UPDATE_AVAILABLE") == "1",
+        "latest_version": os.environ.get("POSSTART_UPDATE_LATEST", ""),
+        "download_url": os.environ.get("POSSTART_UPDATE_URL", ""),
+    }
+
 @app.post("/auth/vendor-login")
 def vendor_login(payload: dict, request: Request):
     """業者パスワード認証（レート制限・ロール別トークン発行）"""
@@ -559,7 +572,7 @@ async def websocket_endpoint(ws: WebSocket):
         ws_manager.disconnect(ws)
 
 # ---------- API認証ミドルウェア ----------
-_PUBLIC_PATHS = {"/", "/auth/vendor-login", "/signup", "/signup/bank", "/ws", "/docs", "/openapi.json", "/favicon.ico", "/stripe/webhook", "/stripe/status"}
+_PUBLIC_PATHS = {"/", "/auth/vendor-login", "/signup", "/signup/bank", "/ws", "/docs", "/openapi.json", "/favicon.ico", "/stripe/webhook", "/stripe/status", "/api/version"}
 
 # サブスクが切れていてもアクセスを許可するパス（解約後も再契約できるように）
 _SUBSCRIPTION_BYPASS_PREFIXES = (
@@ -2757,7 +2770,39 @@ document.addEventListener('DOMContentLoaded',()=>{
   /* バックアップ状態を初回ロード＋5分ごとに更新 */
   loadBackupStatus();
   setInterval(loadBackupStatus, 5*60*1000);
+  /* アップデート通知バナー表示 */
+  checkUpdateNotice();
 });
+
+/* アップデート通知バナー */
+async function checkUpdateNotice(){
+  try{
+    const r = await fetch('/api/version');
+    if(!r.ok) return;
+    const v = await r.json();
+    if(!v.update_available) return;
+    /* 既に表示済みなら再表示しない（同じバージョンを24h dismiss） */
+    const dismissedFor = localStorage.getItem('update_dismiss_for');
+    if(dismissedFor === v.latest_version) return;
+    /* バナー生成 */
+    const banner = document.createElement('div');
+    banner.id = 'updateBanner';
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;padding:10px 14px;display:flex;justify-content:center;align-items:center;gap:14px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.2);flex-wrap:wrap';
+    banner.innerHTML = `
+      <span>📢 新しいバージョン <strong>v${v.latest_version}</strong> が利用可能です（現在 v${v.current}）</span>
+      <a href="${v.download_url}" target="_blank" style="background:#fff;color:#0284c7;padding:5px 14px;border-radius:6px;text-decoration:none;font-weight:700">ダウンロード</a>
+      <button onclick="dismissUpdate('${v.latest_version}')" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.5);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px">後で</button>
+    `;
+    document.body.insertBefore(banner, document.body.firstChild);
+    /* ヘッダーが隠れないようにbodyに余白 */
+    document.body.style.paddingTop = (banner.offsetHeight + 4) + 'px';
+  }catch(e){ /* ignore */ }
+}
+function dismissUpdate(version){
+  localStorage.setItem('update_dismiss_for', version);
+  const b = document.getElementById('updateBanner');
+  if(b){ b.remove(); document.body.style.paddingTop = ''; }
+}
 
 let selectedTableId = null;
 let currentSessionId = null;
