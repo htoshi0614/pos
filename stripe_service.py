@@ -376,11 +376,11 @@ class SignupForStripeIn(BaseModel):
     plan: str = "monthly"   # monthly / yearly
     base_url: str = ""
 
-# Stripe Payment Link（固定URL・¥50,000/月）
+# Stripe Payment Link（固定URL・¥30,000/月）
 # このURLは公開してOK（Stripeがホストする決済ページ）
 PAYMENT_LINK_URL = os.environ.get(
     "STRIPE_PAYMENT_LINK_URL",
-    "https://buy.stripe.com/3cIcMY5vA4nKfT82KN2sM01"
+    "https://buy.stripe.com/00w8wI7DIdYk0Yecln2sM02"
 )
 
 @router.post("/signup/stripe")
@@ -725,7 +725,7 @@ details > div{padding:0 18px 18px}
     <div class="pay-head">
       <div>
         <div class="pay-plan">スタンダードプラン（月額）</div>
-        <div class="pay-price">¥50,000<span>/月（税込）</span></div>
+        <div class="pay-price">¥30,000<span>/月（税込）</span></div>
       </div>
     </div>
     <button class="btn primary full" onclick="goPay()">
@@ -795,7 +795,7 @@ details > div{padding:0 18px 18px}
         <div>普通 3234569</div>
         <div>カ）ポススタート</div>
         <div style="margin-top:10px;font-size:11px;color:var(--muted)">月額</div>
-        <div style="font-weight:700">¥50,000（税込）</div>
+        <div style="font-weight:700">¥30,000（税込）</div>
       </div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:16px">
         お振込確認後、こちらで「期限延長」より有効化させていただきます。
