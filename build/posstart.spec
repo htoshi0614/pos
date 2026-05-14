@@ -28,6 +28,7 @@ hidden_imports = [
     'weather_service',
     'point_mail',
     'backup_service',
+    'data_import',
     'db_shared',
     'uvicorn',
     'uvicorn.logging',
