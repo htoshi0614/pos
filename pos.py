@@ -71,7 +71,7 @@ def _record_attempt(ip: str):
     _login_attempts[ip].append(now)
 
 # ---------- バージョン情報・アップデート通知 ----------
-POSSTART_VERSION = "1.0.1"
+POSSTART_VERSION = "1.0.2"
 
 @app.get("/api/version")
 def api_version():
@@ -2267,6 +2267,11 @@ try:
     app.include_router(_landing_router)
 except Exception as e:
     print(f"[warn] landing router: {e}")
+try:
+    from data_import import router as _import_router
+    app.include_router(_import_router)
+except Exception as e:
+    print(f"[warn] data_import router: {e}")
 
 # ======================= UI (/ui) 完全版（取消＆数量管理つき） =======================
 from fastapi.responses import HTMLResponse
@@ -2484,6 +2489,7 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
   <a href="/ui/mail" style="color:#f59e0b" class="admin-link">📧 メール</a>
   <a href="/ui/attendance" style="color:#22c55e" class="admin-link">🕐 出退勤</a>
   <a href="/ui/subscription" style="color:#0ea5e9" class="admin-link">💳 サブスク</a>
+  <a href="/ui/import" style="color:#f59e0b" class="admin-link">📦 データ移行</a>
 
 </div>
 

@@ -64,7 +64,7 @@ def open_browser_when_ready(port):
             return
         time.sleep(1)
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 UPDATE_INFO = {"available": False, "latest": "", "url": ""}
 
 def check_for_update():
