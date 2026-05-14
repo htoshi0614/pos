@@ -1,17 +1,16 @@
 """data_import.py — 既存POSからのデータ移行ウィザード
 
-CSV/Excel ファイルをアップロードするだけでキャスト・テーブル・メニュー・顧客を一括取り込み。
-列名は日本語/英語どちらでも自動マッチング。
+2つの方法でデータを取り込める:
+  [A] CSV/Excel ファイル (1種類ずつ)
+  [B] SQLiteデータベースファイル (.db 一発で全種類)
 
-使い方:
-  1. /ui/import を開く
-  2. データ種別を選ぶ（キャスト/テーブル/メニュー/顧客）
-  3. テンプレートをDL→編集 or 既存POSのCSVをそのまま選択
-  4. プレビューで確認
-  5. インポート実行
+列名は日本語/英語どちらでも自動マッチング。
 """
 import io
 import csv
+import sqlite3
+import tempfile
+import os
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Header, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
@@ -203,6 +202,187 @@ def auto_map(rows: List[Dict[str, str]], data_type: str) -> Dict[str, Any]:
             mapped.append(rec)
 
     return {"mapped": mapped, "errors": errors, "column_mapping": mapping}
+
+# ─────────────────────────── SQLite ファイル解析 ───────────────────────────
+
+# テーブル名のエイリアス（POSによって違うため複数想定）
+TABLE_NAME_ALIASES = {
+    "casts": ["cast", "casts", "staff", "staffs", "employee", "employees",
+              "girl", "girls", "hostess", "hostesses", "person", "persons",
+              "member", "members", "performer", "キャスト", "スタッフ", "従業員"],
+    "tables": ["table", "tables", "seat", "seats", "room", "rooms",
+               "卓", "席", "テーブル", "フロア"],
+    "items": ["item", "items", "product", "products", "menu", "menus",
+              "menuitem", "menu_item", "menu_items", "merchandise",
+              "drink", "drinks", "food", "foods", "メニュー", "商品", "ドリンク"],
+    "customers": ["customer", "customers", "client", "clients",
+                  "guest", "guests", "user", "users", "顧客", "お客様"],
+}
+
+def scan_sqlite_file(file_bytes: bytes) -> Dict[str, Any]:
+    """SQLiteファイルをスキャンし、データ種別ごとに最適なテーブルを推定"""
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+
+        # 読み取り専用で開く（安全のため）
+        conn = sqlite3.connect(f'file:{tmp_path}?mode=ro', uri=True)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # 全テーブル取得
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        tables = [row[0] for row in cursor.fetchall()]
+
+        result = {
+            "tables_found": [],
+            "matches": {},
+            "errors": [],
+        }
+
+        # 各テーブルの情報を収集
+        for t in tables:
+            try:
+                cursor.execute(f'PRAGMA table_info("{t}")')
+                columns = [row[1] for row in cursor.fetchall()]
+                cursor.execute(f'SELECT COUNT(*) FROM "{t}"')
+                row_count = cursor.fetchone()[0]
+                result["tables_found"].append({
+                    "name": t,
+                    "columns": columns,
+                    "row_count": row_count,
+                })
+            except Exception as e:
+                result["errors"].append(f"テーブル {t} の解析失敗: {e}")
+
+        # データ種別ごとに最適なテーブルを推定
+        for dt_key, dt_spec in DATA_TYPES.items():
+            best_table = None
+            best_score = 0
+            best_mapping = {}
+
+            for t_info in result["tables_found"]:
+                table_name = t_info["name"]
+                columns = t_info["columns"]
+
+                # 列マッチングでスコア計算
+                mapping = {}
+                score = 0
+                required_matched = 0
+                required_total = 0
+
+                for field in dt_spec["fields"]:
+                    if field.get("required"):
+                        required_total += 1
+                    idx = find_field(columns, field["aliases"])
+                    if idx is not None:
+                        mapping[field["key"]] = columns[idx]
+                        score += 10 if field.get("required") else 5
+                        if field.get("required"):
+                            required_matched += 1
+
+                # 必須項目が全部マッチしていなければ却下
+                if required_total > 0 and required_matched < required_total:
+                    continue
+
+                # テーブル名ボーナス
+                tn_lower = table_name.lower()
+                for alias in TABLE_NAME_ALIASES.get(dt_key, []):
+                    al = alias.lower()
+                    if tn_lower == al:
+                        score += 50  # 完全一致
+                        break
+                    elif al in tn_lower or tn_lower in al:
+                        score += 20  # 部分一致
+                        break
+
+                if score > best_score:
+                    best_score = score
+                    best_table = table_name
+                    best_mapping = mapping
+
+            if best_table:
+                # 該当テーブルの行数取得
+                row_count = next((t["row_count"] for t in result["tables_found"] if t["name"] == best_table), 0)
+                # プレビューデータも取得（最初の5件）
+                preview_rows = []
+                try:
+                    cursor.execute(f'SELECT * FROM "{best_table}" LIMIT 5')
+                    cols = [d[0] for d in cursor.description]
+                    for row in cursor.fetchall():
+                        preview_rows.append(dict(zip(cols, row)))
+                except Exception:
+                    pass
+                result["matches"][dt_key] = {
+                    "table": best_table,
+                    "column_mapping": best_mapping,
+                    "row_count": row_count,
+                    "score": best_score,
+                    "confidence": "high" if best_score >= 50 else ("medium" if best_score >= 25 else "low"),
+                    "preview": preview_rows,
+                }
+        conn.close()
+        return result
+    except sqlite3.DatabaseError as e:
+        return {"tables_found": [], "matches": {}, "errors": [f"SQLiteファイルとして読めません: {e}"]}
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+def extract_sqlite_rows(file_bytes: bytes, data_type: str, table_name: str, column_mapping: Dict[str, str]) -> List[Dict]:
+    """SQLiteから指定テーブル・マッピングで行を抽出 → 内部形式に変換"""
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+
+        conn = sqlite3.connect(f'file:{tmp_path}?mode=ro', uri=True)
+        cursor = conn.cursor()
+        cursor.execute(f'SELECT * FROM "{table_name}"')
+        cols = [d[0] for d in cursor.description]
+        rows = cursor.fetchall()
+        conn.close()
+
+        # rowsを辞書のリストに変換
+        dict_rows = [dict(zip(cols, r)) for r in rows]
+
+        # auto_map形式で正規化
+        spec = DATA_TYPES[data_type]
+        result = []
+        for ri, row in enumerate(dict_rows, start=2):
+            rec = {}
+            skip = False
+            for f in spec["fields"]:
+                key = f["key"]
+                src_col = column_mapping.get(key)
+                raw_val = row.get(src_col, '') if src_col else ''
+                ftype = f.get("type", "str")
+                default = f.get("default", "")
+                val = cast_value(raw_val, ftype, default)
+                if f.get("required") and (val is None or val == ""):
+                    if raw_val is None or str(raw_val).strip() == "":
+                        skip = True
+                        break
+                if key == "category" and isinstance(val, str):
+                    v = val.strip().lower()
+                    val = CATEGORY_MAP.get(v, CATEGORY_MAP.get(val.strip(), "drink"))
+                rec[key] = val
+            if not skip:
+                rec["_row"] = ri
+                result.append(rec)
+        return result
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
 # ─────────────────────────── テンプレート生成 ───────────────────────────
 
@@ -398,6 +578,124 @@ async def execute_import(data_type: str = Form(...),
     finally:
         db.close()
 
+# ─────────────────────────── SQLite API ───────────────────────────
+
+@router.post("/api/import/sqlite/scan")
+async def sqlite_scan(file: UploadFile = File(...),
+                       x_role: Optional[str] = Header(None, alias="X-Role")):
+    """アップロードされたSQLiteファイルをスキャン → 全データ種別の検出結果を返す"""
+    require_role(x_role, ADMIN_ROLES)
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "ファイルが空です")
+    result = scan_sqlite_file(raw)
+    if not result["tables_found"]:
+        raise HTTPException(400, "SQLiteファイルにテーブルが見つかりません。"
+                                  "（ファイル形式が間違っている可能性があります）")
+    return {
+        "filename": file.filename,
+        "tables_count": len(result["tables_found"]),
+        "tables_list": [{"name": t["name"], "columns": t["columns"], "row_count": t["row_count"]} for t in result["tables_found"]],
+        "matches": result["matches"],
+        "errors": result["errors"],
+    }
+
+@router.post("/api/import/sqlite/execute")
+async def sqlite_execute(
+    file: UploadFile = File(...),
+    selected_types: str = Form(...),  # カンマ区切り: "casts,items,customers"
+    store_id: int = Form(1),
+    skip_duplicates: bool = Form(True),
+    x_role: Optional[str] = Header(None, alias="X-Role"),
+):
+    """SQLiteファイルから複数データ種別を一括インポート"""
+    require_role(x_role, ADMIN_ROLES)
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "ファイルが空です")
+    scan = scan_sqlite_file(raw)
+    types_to_import = [t.strip() for t in selected_types.split(",") if t.strip() in DATA_TYPES]
+    if not types_to_import:
+        raise HTTPException(400, "取り込み対象が選択されていません")
+
+    # DB保存ループ
+    from pos import Cast, Table, Item, Customer
+    from cast_salary import CastSalaryConfig
+
+    db = SessionLocal()
+    summary = {}
+    try:
+        for dt_key in types_to_import:
+            match = scan["matches"].get(dt_key)
+            if not match:
+                summary[dt_key] = {"inserted": 0, "updated": 0, "skipped": 0, "skipped_reason": "対象テーブル未検出"}
+                continue
+
+            rows = extract_sqlite_rows(raw, dt_key, match["table"], match["column_mapping"])
+            inserted = updated = skipped = 0
+
+            for rec in rows:
+                rec.pop("_row", None)
+                if dt_key == "casts":
+                    existing = db.query(Cast).filter_by(store_id=store_id, name=rec["name"]).first()
+                    if existing:
+                        if skip_duplicates:
+                            skipped += 1; continue
+                        cast = existing; updated += 1
+                    else:
+                        cast = Cast(store_id=store_id, name=rec["name"],
+                                    rank=rec.get("rank", ""), is_active=True)
+                        db.add(cast); db.flush(); inserted += 1
+                    cfg = db.query(CastSalaryConfig).filter_by(cast_id=cast.id).first()
+                    if not cfg:
+                        cfg = CastSalaryConfig(cast_id=cast.id, store_id=store_id)
+                        db.add(cfg)
+                    for k in ["hourly_rate","drink_back_rate","nom_fee_hon","nom_fee_jyonai","nom_fee_dohan","floor_rate"]:
+                        if k in rec and rec[k] is not None:
+                            try: setattr(cfg, k, float(rec[k]))
+                            except (ValueError, TypeError): pass
+                elif dt_key == "tables":
+                    existing = db.query(Table).filter_by(store_id=store_id, name=rec["name"]).first()
+                    if existing:
+                        if skip_duplicates: skipped += 1; continue
+                    else:
+                        db.add(Table(store_id=store_id, name=rec["name"])); inserted += 1
+                elif dt_key == "items":
+                    existing = db.query(Item).filter_by(store_id=store_id, name=rec["name"]).first()
+                    if existing:
+                        if skip_duplicates: skipped += 1; continue
+                        item = existing; updated += 1
+                    else:
+                        item = Item(store_id=store_id, name=rec["name"]); db.add(item); inserted += 1
+                    item.category = rec.get("category", "drink")
+                    item.price = float(rec.get("price", 0) or 0)
+                    item.stock = int(rec.get("stock", 0) or 0)
+                    if item.category == "bottle":
+                        item.keepable = True
+                elif dt_key == "customers":
+                    existing = db.query(Customer).filter_by(store_id=store_id, nickname=rec["nickname"]).first()
+                    if existing:
+                        if skip_duplicates: skipped += 1; continue
+                        cust = existing; updated += 1
+                    else:
+                        cust = Customer(store_id=store_id, nickname=rec["nickname"]); db.add(cust); inserted += 1
+                    cust.phone = rec.get("phone", "") or ""
+                    cust.memo = rec.get("memo", "") or ""
+
+            summary[dt_key] = {
+                "inserted": inserted,
+                "updated": updated,
+                "skipped": skipped,
+                "source_table": match["table"],
+            }
+        db.commit()
+        return {"ok": True, "summary": summary}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"インポート中エラー: {str(e)}")
+    finally:
+        db.close()
+
 # ─────────────────────────── UI ───────────────────────────
 
 @router.get("/ui/import", response_class=HTMLResponse)
@@ -480,6 +778,30 @@ header h1{font-size:17px;margin:0}
 
 .hidden{display:none!important}
 
+/* 方法選択タブ */
+.method-tabs{display:flex;gap:8px;margin-bottom:18px;background:#0a1423;border:1px solid var(--line);border-radius:12px;padding:6px}
+.method-tab{flex:1;padding:14px 18px;border-radius:8px;border:none;background:transparent;color:var(--muted);font-weight:600;cursor:pointer;font-size:13px;transition:.2s;font-family:inherit}
+.method-tab:hover{color:var(--text)}
+.method-tab.on{background:var(--accent);color:#001018}
+
+/* SQLite検出結果カード */
+.match-card{background:#0a1423;border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:10px;display:flex;align-items:center;gap:12px;transition:.2s}
+.match-card.high{border-color:var(--green)}
+.match-card.medium{border-color:var(--amber)}
+.match-card.low{border-color:var(--red);opacity:.65}
+.match-card.none{border-color:var(--line);opacity:.45}
+.match-toggle{flex-shrink:0}
+.match-toggle input{width:20px;height:20px;cursor:pointer;accent-color:var(--accent)}
+.match-info{flex:1;min-width:0}
+.match-info .name{font-weight:700;font-size:14px;margin-bottom:2px}
+.match-info .meta{font-size:11px;color:var(--muted)}
+.match-info .meta strong{color:var(--text)}
+.confidence-pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.05em}
+.confidence-pill.high{background:rgba(34,197,94,.15);color:#86efac}
+.confidence-pill.medium{background:rgba(245,158,11,.15);color:#fcd34d}
+.confidence-pill.low{background:rgba(239,68,68,.15);color:#fca5a5}
+.confidence-pill.none{background:#1c1c2e;color:var(--muted)}
+
 @media(max-width:600px){
   .container{padding:14px 10px}
   .type-grid{grid-template-columns:1fr}
@@ -500,6 +822,18 @@ header h1{font-size:17px;margin:0}
 
 <div class="container">
 
+  <!-- インポート方法選択 -->
+  <div class="method-tabs">
+    <button class="method-tab on" data-method="csv" onclick="switchMethod('csv')">📄 CSV / Excel ファイル</button>
+    <button class="method-tab" data-method="sqlite" onclick="switchMethod('sqlite')">💾 データベースファイル (.db)</button>
+  </div>
+
+  <!-- 通知（共通） -->
+  <div id="alertBox"></div>
+
+  <!-- ═════════ CSV / Excel フロー ═════════ -->
+  <div id="csvFlow">
+
   <!-- ステップ -->
   <div class="steps">
     <div class="step on" id="step1"><div class="step-num">1</div><div class="step-label">種別選択</div></div>
@@ -507,9 +841,6 @@ header h1{font-size:17px;margin:0}
     <div class="step" id="step3"><div class="step-num">3</div><div class="step-label">プレビュー</div></div>
     <div class="step" id="step4"><div class="step-num">4</div><div class="step-label">完了</div></div>
   </div>
-
-  <!-- 通知 -->
-  <div id="alertBox"></div>
 
   <!-- ─── Step 1: 種別選択 ─── -->
   <div class="card" id="card1">
@@ -583,6 +914,50 @@ header h1{font-size:17px;margin:0}
       <a class="btn ghost" href="/ui">フロアに戻る</a>
     </div>
   </div>
+
+  </div><!-- /csvFlow -->
+
+  <!-- ═════════ SQLite フロー ═════════ -->
+  <div id="sqliteFlow" class="hidden">
+
+    <!-- Step 1: ファイル選択 -->
+    <div class="card" id="sqCard1">
+      <h2>💾 SQLiteデータベースファイルから一括移行</h2>
+      <div class="alert info">
+        💡 既存POSの <strong>.db / .sqlite / .sqlite3</strong> ファイルをアップロードしてください。<br>
+        テーブル構造を自動解析して、キャスト・テーブル・メニュー・顧客を**一発で**取り込みます。
+      </div>
+      <label class="drop" id="sqDrop">
+        <input type="file" id="sqFileInput" accept=".db,.sqlite,.sqlite3">
+        <span class="ic">💾</span>
+        <div class="ti">クリックしてSQLiteファイルを選択 または ドラッグ&ドロップ</div>
+        <div class="sub">.db / .sqlite / .sqlite3 対応</div>
+      </label>
+      <div id="sqFileName" style="margin-top:12px;text-align:center;color:var(--muted);font-size:13px"></div>
+    </div>
+
+    <!-- Step 2: 自動検出結果 -->
+    <div class="card hidden" id="sqCard2">
+      <h2>🔍 自動検出結果</h2>
+      <div id="sqScanSummary"></div>
+      <div id="sqMatchesArea" style="margin-top:14px"></div>
+      <div style="margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between">
+        <button class="btn ghost" onclick="resetSqlite()">← ファイルを選び直す</button>
+        <button class="btn success" id="sqExecute">✅ チェックを入れたデータを一括インポート</button>
+      </div>
+    </div>
+
+    <!-- Step 3: 完了 -->
+    <div class="card hidden" id="sqCard3">
+      <h2>🎉 インポート完了</h2>
+      <div id="sqCompletion"></div>
+      <div style="margin-top:20px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn primary" onclick="resetSqlite()">🔄 別のファイルをインポート</button>
+        <a class="btn ghost" href="/ui">フロアに戻る</a>
+      </div>
+    </div>
+
+  </div><!-- /sqliteFlow -->
 
 </div>
 
@@ -784,6 +1159,190 @@ function resetAll(){
   $('btnExecute').disabled = false;
   $('btnExecute').textContent = '✅ この内容でインポート実行';
   goStep(1);
+}
+
+// ═════════ 方法切替 ═════════
+function switchMethod(m){
+  document.querySelectorAll('.method-tab').forEach(t => t.classList.toggle('on', t.dataset.method === m));
+  $('csvFlow').classList.toggle('hidden', m !== 'csv');
+  $('sqliteFlow').classList.toggle('hidden', m !== 'sqlite');
+  $('alertBox').innerHTML = '';
+}
+
+// ═════════ SQLite フロー ═════════
+let sqFile = null;
+let sqScanData = null;
+const TYPE_ICONS = {casts:'👤', tables:'🪑', items:'🍸', customers:'🤝'};
+const CONF_LABELS = {high:'高精度', medium:'中精度', low:'低精度', none:'未検出'};
+
+const sqDrop = $('sqDrop');
+const sqFileInput = $('sqFileInput');
+['dragenter','dragover'].forEach(e => sqDrop.addEventListener(e, ev => { ev.preventDefault(); sqDrop.classList.add('over'); }));
+['dragleave','drop'].forEach(e => sqDrop.addEventListener(e, ev => { ev.preventDefault(); sqDrop.classList.remove('over'); }));
+sqDrop.addEventListener('drop', ev => {
+  if(ev.dataTransfer.files.length) handleSqFile(ev.dataTransfer.files[0]);
+});
+sqFileInput.addEventListener('change', () => {
+  if(sqFileInput.files.length) handleSqFile(sqFileInput.files[0]);
+});
+
+async function handleSqFile(f){
+  sqFile = f;
+  $('sqFileName').textContent = `💾 ${f.name} （${(f.size/1024).toFixed(1)} KB）`;
+  const fd = new FormData();
+  fd.append('file', f);
+  showAlert('info', '⏳ データベースを解析中... テーブル構造を検出しています', 0);
+  try{
+    const r = await fetch('/api/import/sqlite/scan', {
+      method:'POST',
+      headers:{'X-Role':'owner','X-Token':sessionStorage.getItem('pos_token')||''},
+      body: fd
+    });
+    if(!r.ok) throw new Error(await r.text());
+    sqScanData = await r.json();
+    $('alertBox').innerHTML = '';
+    renderSqScan();
+    $('sqCard2').classList.remove('hidden');
+    $('sqCard2').scrollIntoView({behavior:'smooth'});
+  }catch(e){
+    showAlert('error', '解析エラー: ' + e.message);
+  }
+}
+
+function renderSqScan(){
+  const d = sqScanData;
+  $('sqScanSummary').innerHTML = `
+    <div class="alert info">
+      📊 <strong>${d.tables_count}</strong>個のテーブルが見つかりました（${d.filename}）。<br>
+      以下から取り込みたいデータにチェックを入れてください。
+    </div>
+  `;
+
+  let html = '';
+  const allTypes = ['casts', 'tables', 'items', 'customers'];
+  for(const dt of allTypes){
+    const m = d.matches[dt];
+    const label = TYPE_LABELS[dt];
+    const icon = TYPE_ICONS[dt];
+    if(m){
+      const conf = m.confidence;
+      const cols = Object.entries(m.column_mapping)
+        .map(([k,v]) => `<span style="color:var(--muted)">${v}</span>→<span style="color:var(--accent)">${k}</span>`)
+        .join(' ／ ');
+      html += `
+        <div class="match-card ${conf}">
+          <label class="match-toggle">
+            <input type="checkbox" checked data-type="${dt}">
+          </label>
+          <div class="match-info">
+            <div class="name">${icon} ${label}　<span class="confidence-pill ${conf}">${CONF_LABELS[conf]}</span></div>
+            <div class="meta">
+              📋 テーブル: <strong>${m.table}</strong>　／
+              件数: <strong>${m.row_count}</strong>件
+            </div>
+            <div class="meta" style="margin-top:4px">列マッピング: ${cols}</div>
+          </div>
+        </div>
+      `;
+    } else {
+      html += `
+        <div class="match-card none">
+          <label class="match-toggle">
+            <input type="checkbox" disabled data-type="${dt}">
+          </label>
+          <div class="match-info">
+            <div class="name">${icon} ${label}　<span class="confidence-pill none">未検出</span></div>
+            <div class="meta">該当するテーブルが見つかりませんでした</div>
+          </div>
+        </div>
+      `;
+    }
+  }
+  $('sqMatchesArea').innerHTML = html;
+}
+
+$('sqExecute').addEventListener('click', async () => {
+  const checked = Array.from(document.querySelectorAll('#sqMatchesArea input[type="checkbox"]:checked'))
+    .map(c => c.dataset.type);
+  if(!checked.length){ alert('取り込むデータを選択してください'); return; }
+  if(!confirm(`選択したデータ（${checked.length}種類）を一括インポートします。よろしいですか？\n\n（既に同じ名前のデータがある場合はスキップされます）`)) return;
+
+  const fd = new FormData();
+  fd.append('file', sqFile);
+  fd.append('selected_types', checked.join(','));
+  fd.append('store_id', '1');
+  fd.append('skip_duplicates', 'true');
+  $('sqExecute').disabled = true;
+  $('sqExecute').textContent = '⏳ インポート中...';
+  try{
+    const r = await fetch('/api/import/sqlite/execute', {
+      method:'POST',
+      headers:{'X-Role':'owner','X-Token':sessionStorage.getItem('pos_token')||''},
+      body: fd
+    });
+    if(!r.ok) throw new Error(await r.text());
+    const result = await r.json();
+    renderSqDone(result.summary);
+    $('sqCard1').classList.add('hidden');
+    $('sqCard2').classList.add('hidden');
+    $('sqCard3').classList.remove('hidden');
+    window.scrollTo({top:0, behavior:'smooth'});
+  }catch(e){
+    showAlert('error', 'インポート失敗: ' + e.message);
+    $('sqExecute').disabled = false;
+    $('sqExecute').textContent = '✅ チェックを入れたデータを一括インポート';
+  }
+});
+
+function renderSqDone(summary){
+  let totalIns = 0, totalUpd = 0, totalSkip = 0;
+  let rows = '';
+  for(const [dt, s] of Object.entries(summary)){
+    totalIns += s.inserted || 0;
+    totalUpd += s.updated || 0;
+    totalSkip += s.skipped || 0;
+    rows += `
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;padding:10px 12px;background:#0a1423;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;font-size:13px">
+        <div>${TYPE_ICONS[dt]} ${TYPE_LABELS[dt]}</div>
+        <div style="color:var(--green)">追加: ${s.inserted||0}</div>
+        <div style="color:var(--accent)">更新: ${s.updated||0}</div>
+        <div style="color:var(--muted)">スキップ: ${s.skipped||0}</div>
+      </div>
+    `;
+  }
+  $('sqCompletion').innerHTML = `
+    <div class="alert success">
+      🎉 一括インポートが完了しました！
+    </div>
+    <div style="margin-top:14px">${rows}</div>
+    <div style="background:#0a1423;border:1px solid var(--line);border-radius:10px;padding:18px;margin-top:14px;display:grid;grid-template-columns:repeat(3,1fr);gap:14px;text-align:center">
+      <div>
+        <div style="font-size:32px;font-weight:700;color:var(--green)">${totalIns}</div>
+        <div style="font-size:12px;color:var(--muted)">合計新規追加</div>
+      </div>
+      <div>
+        <div style="font-size:32px;font-weight:700;color:var(--accent)">${totalUpd}</div>
+        <div style="font-size:12px;color:var(--muted)">合計更新</div>
+      </div>
+      <div>
+        <div style="font-size:32px;font-weight:700;color:var(--muted)">${totalSkip}</div>
+        <div style="font-size:12px;color:var(--muted)">合計スキップ</div>
+      </div>
+    </div>
+  `;
+}
+
+function resetSqlite(){
+  sqFile = null; sqScanData = null;
+  $('sqFileInput').value = '';
+  $('sqFileName').textContent = '';
+  $('sqMatchesArea').innerHTML = '';
+  $('sqScanSummary').innerHTML = '';
+  $('sqExecute').disabled = false;
+  $('sqExecute').textContent = '✅ チェックを入れたデータを一括インポート';
+  $('sqCard1').classList.remove('hidden');
+  $('sqCard2').classList.add('hidden');
+  $('sqCard3').classList.add('hidden');
 }
 </script>
 </body></html>""")
