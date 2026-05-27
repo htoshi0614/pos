@@ -71,7 +71,7 @@ def _record_attempt(ip: str):
     _login_attempts[ip].append(now)
 
 # ---------- バージョン情報・アップデート通知 ----------
-POSSTART_VERSION = "1.0.3"
+POSSTART_VERSION = "1.0.4"
 
 @app.get("/api/version")
 def api_version():
@@ -110,7 +110,7 @@ def signup_page():
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>お申し込み - POS Start</title>
 <style>
-:root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--accent:#0ea5e9;--green:#22c55e}
+:root{--bg:#fafafa;--card:#ffffff;--card2:#ffffff;--line:#eaeaef;--border:#eaeaef;--text:#0a0a0f;--ink:#0a0a0f;--muted:#8a8a95;--body:#4a4a55;--accent:#d64583;--accent-soft:#fdf0f7;--accent-dark:#b03468;--gold:#c9a96e;--gold-soft:#faf3e3;--warn:#f59e0b;--amber:#f59e0b;--err:#ef4444;--red:#ef4444;--ok:#22c55e;--green:#22c55e;--blue:#3b82f6;--purple:#a855f7;}
 *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
 html,body{height:100%}
 body{background:var(--bg);color:var(--text);display:flex;align-items:center;justify-content:center;min-height:100vh}
@@ -149,6 +149,39 @@ body{background:var(--bg);color:var(--text);display:flex;align-items:center;just
 .success-msg{display:none;text-align:center;padding:40px 20px}
 .success-msg h2{color:var(--green);margin-bottom:12px}
 .error-msg{color:#ef4444;font-size:13px;margin-top:8px;display:none}
+
+/* === Premium Pink Theme Override (auto-injected) === */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap');
+body{font-family:'Inter','Noto Sans JP',-apple-system,system-ui,Segoe UI,Roboto,sans-serif !important;background:#fafafa !important;color:#0a0a0f !important;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{color:#0a0a0f}
+a{color:#d64583}
+.card,section,article{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.stat,.kpi,.tile,.metric{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f}
+table{border-color:#eaeaef !important}
+th{background:#fafafa !important;color:#4a4a55 !important;border-color:#eaeaef !important;font-weight:700 !important}
+td{border-color:#f3f3f6 !important;color:#0a0a0f !important;background:#ffffff}
+tr:nth-child(even) td{background:#fafafa}
+.btn{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f !important;font-weight:600 !important;transition:all .2s}
+.btn:hover{border-color:#d64583 !important;color:#d64583 !important}
+.btn.primary,.btn.solid{background:#d64583 !important;border-color:#d64583 !important;color:#ffffff !important}
+.btn.danger{background:#ef4444 !important;border-color:#ef4444 !important;color:#ffffff !important}
+input,select,textarea{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f !important}
+input:focus,select:focus{border-color:#d64583 !important;box-shadow:0 0 0 3px #fdf0f7 !important;outline:none}
+.method.POST{background:#f0fdf4 !important;color:#15803d !important}
+.method.DELETE{background:#fef2f2 !important;color:#b91c1c !important}
+.method.PATCH{background:#fff7ed !important;color:#c2410c !important}
+.method.PUT{background:#eff6ff !important;color:#1d4ed8 !important}
+.cast-card{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.cast-card.in .status{background:#f0fdf4 !important;color:#15803d !important}
+.cast-card.out .status{background:#fafafa !important;color:#8a8a95 !important}
+.bar{background:#ffffff !important;border-color:#eaeaef}
+.notice{background:#fff7ed !important;color:#7c2d12 !important;border-left:3px solid #f59e0b !important}
+.modal-card{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.toast.ok{background:#f0fdf4 !important;color:#14532d !important;border-color:#86efac !important}
+.toast.err{background:#fef2f2 !important;color:#7f1d1d !important;border-color:#fca5a5 !important}
+[style*="background:#111827"],[style*="background:#0f172a"],[style*="background:#0a1220"],[style*="background:#0e1a26"]{background:#ffffff !important;color:#0a0a0f !important}
+[style*="border:1px solid #263244"],[style*="border:1px solid #334155"]{border-color:#eaeaef !important}
+
 </style>
 </head>
 <body>
@@ -350,7 +383,7 @@ def landing_page():
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>POS Start - ガールズバー専用POSシステム</title>
 <style>
-:root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--accent:#0ea5e9;--green:#22c55e;--purple:#a855f7}
+:root{--bg:#fafafa;--card:#ffffff;--card2:#ffffff;--line:#eaeaef;--border:#eaeaef;--text:#0a0a0f;--ink:#0a0a0f;--muted:#8a8a95;--body:#4a4a55;--accent:#d64583;--accent-soft:#fdf0f7;--accent-dark:#b03468;--gold:#c9a96e;--gold-soft:#faf3e3;--warn:#f59e0b;--amber:#f59e0b;--err:#ef4444;--red:#ef4444;--ok:#22c55e;--green:#22c55e;--blue:#3b82f6;--purple:#a855f7;}
 *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
 html,body{height:100%}
 body{background:var(--bg);color:var(--text);display:flex;align-items:center;justify-content:center;min-height:100vh}
@@ -394,6 +427,39 @@ body{background:var(--bg);color:var(--text);display:flex;align-items:center;just
 .footer p{font-size:11px;color:#475569;line-height:1.6}
 @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
 .shake{animation:shake .3s ease}
+
+/* === Premium Pink Theme Override (auto-injected) === */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap');
+body{font-family:'Inter','Noto Sans JP',-apple-system,system-ui,Segoe UI,Roboto,sans-serif !important;background:#fafafa !important;color:#0a0a0f !important;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{color:#0a0a0f}
+a{color:#d64583}
+.card,section,article{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.stat,.kpi,.tile,.metric{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f}
+table{border-color:#eaeaef !important}
+th{background:#fafafa !important;color:#4a4a55 !important;border-color:#eaeaef !important;font-weight:700 !important}
+td{border-color:#f3f3f6 !important;color:#0a0a0f !important;background:#ffffff}
+tr:nth-child(even) td{background:#fafafa}
+.btn{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f !important;font-weight:600 !important;transition:all .2s}
+.btn:hover{border-color:#d64583 !important;color:#d64583 !important}
+.btn.primary,.btn.solid{background:#d64583 !important;border-color:#d64583 !important;color:#ffffff !important}
+.btn.danger{background:#ef4444 !important;border-color:#ef4444 !important;color:#ffffff !important}
+input,select,textarea{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f !important}
+input:focus,select:focus{border-color:#d64583 !important;box-shadow:0 0 0 3px #fdf0f7 !important;outline:none}
+.method.POST{background:#f0fdf4 !important;color:#15803d !important}
+.method.DELETE{background:#fef2f2 !important;color:#b91c1c !important}
+.method.PATCH{background:#fff7ed !important;color:#c2410c !important}
+.method.PUT{background:#eff6ff !important;color:#1d4ed8 !important}
+.cast-card{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.cast-card.in .status{background:#f0fdf4 !important;color:#15803d !important}
+.cast-card.out .status{background:#fafafa !important;color:#8a8a95 !important}
+.bar{background:#ffffff !important;border-color:#eaeaef}
+.notice{background:#fff7ed !important;color:#7c2d12 !important;border-left:3px solid #f59e0b !important}
+.modal-card{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.toast.ok{background:#f0fdf4 !important;color:#14532d !important;border-color:#86efac !important}
+.toast.err{background:#fef2f2 !important;color:#7f1d1d !important;border-color:#fca5a5 !important}
+[style*="background:#111827"],[style*="background:#0f172a"],[style*="background:#0a1220"],[style*="background:#0e1a26"]{background:#ffffff !important;color:#0a0a0f !important}
+[style*="border:1px solid #263244"],[style*="border:1px solid #334155"]{border-color:#eaeaef !important}
+
 </style>
 </head>
 <body>
@@ -2286,87 +2352,122 @@ def ui():
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Cabaret POS - Floor</title>
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap');
 :root{
-  --bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#b0bec5;--accent:#0ea5e9;
-  --table-free:#e5e7eb; --t-ok:#ffffff; --t-warn:#facc15; --t-over:#ef4444; --t-paid:#3b82f6; --ink:#0b1220;
+  --ink:#0a0a0f; --text:#0a0a0f; --body:#4a4a55; --muted:#8a8a95;
+  --line:#eaeaef; --line2:#f3f3f6;
+  --bg:#fafafa; --card:#ffffff; --card2:#fafafa;
+  --accent:#d64583; --accent-soft:#fdf0f7; --accent-dark:#b03468;
+  --green:#22c55e; --amber:#f59e0b; --red:#ef4444; --blue:#3b82f6;
+  --shadow-sm:0 1px 3px rgba(10,10,15,.04),0 2px 8px rgba(10,10,15,.04);
+  --shadow-md:0 4px 12px rgba(10,10,15,.06),0 12px 32px rgba(10,10,15,.06);
+  --table-free:#ffffff; --t-ok:#ffffff; --t-warn:#fff7ed; --t-over:#fef2f2; --t-paid:#eff6ff;
 }
-*{box-sizing:border-box;font-family:-apple-system,system-ui,"Noto Sans JP",Segoe UI,Roboto,sans-serif}
-html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text)}
-header{position:sticky;top:0;z-index:40;display:flex;gap:12px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);background:rgba(11,18,32,.9);backdrop-filter:blur(6px)}
-header h1{margin:0 10px 0 0;font-size:18px}
-select,input{font-size:16px;padding:8px 10px;border-radius:10px;border:1px solid #263244;background:var(--card);color:var(--text)}
-.btn{cursor:pointer;font-size:15px;padding:8px 12px;border-radius:10px;border:1px solid #334155;background:#111827;color:var(--text)}
-.btn.solid{background:var(--accent);border-color:var(--accent);color:#001018}
-.page{display:grid;grid-template-columns:1fr 440px;gap:14px;padding:14px}
-.panel{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden}
-.panel h2{margin:0;padding:12px 14px;border-bottom:1px solid var(--line);font-size:15px}
+*{box-sizing:border-box;font-family:'Inter','Noto Sans JP',-apple-system,system-ui,Segoe UI,Roboto,sans-serif}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+header{position:sticky;top:0;z-index:40;display:flex;gap:12px;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.92);backdrop-filter:blur(20px);min-height:72px}
+header h1{margin:0 10px 0 0;font-size:18px;font-weight:800;letter-spacing:.02em;background:linear-gradient(135deg,var(--ink),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+select,input{font-size:14px;padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--text);outline:none;transition:all .2s;font-family:inherit}
+select:focus,input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.btn{cursor:pointer;font-size:13px;font-weight:600;padding:9px 14px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--ink);font-family:inherit;transition:all .2s}
+.btn:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-1px);box-shadow:var(--shadow-sm)}
+.btn.solid{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.solid:hover{background:var(--accent-dark);border-color:var(--accent-dark);color:#fff}
+.page{display:grid;grid-template-columns:1fr 440px;gap:18px;padding:18px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:var(--shadow-sm)}
+.panel h2{margin:0;padding:14px 18px;border-bottom:1px solid var(--line);font-size:14px;font-weight:700;letter-spacing:.02em}
 .p{padding:14px}
-.floor-wrap{position:relative;height:68vh;border:1px dashed #223046;border-radius:12px;background:#0a1423;overflow:hidden}
+.floor-wrap{position:relative;height:68vh;border-radius:12px;background:repeating-linear-gradient(45deg,#fafafa 0,#fafafa 14px,#fff 14px,#fff 28px);overflow:hidden;border:1px solid var(--line)}
 .table{
-  position:absolute;min-width:140px;min-height:86px;border:2px solid #cbd5e1;border-radius:14px;
+  position:absolute;min-width:140px;min-height:86px;border:2px solid var(--line);border-radius:14px;
   padding:10px 12px;cursor:pointer;user-select:none;background:#fff;color:var(--ink);
-  box-shadow:0 8px 24px rgba(0,0,0,.18);
+  box-shadow:0 4px 12px rgba(10,10,15,.06);
+  transition:transform .2s,box-shadow .2s,border-color .2s;
 }
-.table.sel{outline:3px solid #155e75}
-.table .name{font-size:18px;font-weight:700}
-.table .small{font-size:12px;opacity:.9}
-.table .ttime{font-size:14px;font-weight:700;margin-top:4px}
-.table .tnomi{font-size:10px;margin-top:2px;opacity:.95;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.3px}
-.table.t-free{background:var(--table-free);color:#111827}
-.table.t-ok{background:var(--t-ok);color:var(--ink)}
-.table.t-warn{background:var(--t-warn);color:#1f2937}
-.table.t-over{background:var(--t-over);color:#fff;border-color:#fee2e2}
-.table.t-paid{background:var(--t-paid);color:#fff;border-color:#93c5fd}
+.table:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(214,69,131,.12)}
+.table.sel{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft),0 8px 24px rgba(214,69,131,.18)}
+.table .name{font-size:18px;font-weight:800;letter-spacing:-.01em}
+.table .small{font-size:12px;color:var(--muted)}
+.table .ttime{font-size:16px;font-weight:700;margin-top:4px;letter-spacing:-.01em;font-family:'Inter',sans-serif}
+.table .tnomi{font-size:10px;margin-top:2px;color:var(--accent);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.3px}
+.table.t-free{background:#fff;color:var(--ink);border-color:var(--line)}
+.table.t-free .name{color:var(--muted)}
+.table.t-ok{background:#fff;color:var(--ink);border-color:#bbf7d0}
+.table.t-ok::before{content:'';position:absolute;top:-2px;left:-2px;right:-2px;height:4px;background:var(--green);border-radius:14px 14px 0 0}
+.table.t-warn{background:var(--t-warn);color:var(--ink);border-color:#fed7aa}
+.table.t-warn::before{content:'';position:absolute;top:-2px;left:-2px;right:-2px;height:4px;background:var(--amber);border-radius:14px 14px 0 0}
+.table.t-warn .ttime{color:var(--amber)}
+.table.t-over{background:var(--t-over);color:var(--ink);border-color:#fecaca}
+.table.t-over::before{content:'';position:absolute;top:-2px;left:-2px;right:-2px;height:4px;background:var(--red);border-radius:14px 14px 0 0}
+.table.t-over .ttime{color:var(--red)}
+.table.t-paid{background:var(--t-paid);color:var(--ink);border-color:#bfdbfe}
+.table.t-paid::before{content:'';position:absolute;top:-2px;left:-2px;right:-2px;height:4px;background:var(--blue);border-radius:14px 14px 0 0}
 .side{display:flex;flex-direction:column;gap:12px}
-.card{background:#0c1626;border:1px solid #1f2b3f;border-radius:14px}
-.card h3{margin:0;padding:10px 12px;border-bottom:1px solid #1f2b3f;font-size:14px}
-.card .cbody{padding:10px 12px}
-.tabs{display:flex;border-bottom:1px solid var(--line)}
-.tab{flex:1;text-align:center;padding:10px 8px;cursor:pointer;border-bottom:2px solid transparent;font-size:14px}
-.tab.active{border-color:var(--accent);font-weight:700;background:#0c1624}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-sm)}
+.card h3{margin:0;padding:12px 16px;border-bottom:1px solid var(--line);font-size:13px;font-weight:700;color:var(--ink);letter-spacing:.02em}
+.card .cbody{padding:14px 16px}
+.tabs{display:flex;border-bottom:1px solid var(--line);background:#fff}
+.tab{flex:1;text-align:center;padding:12px 8px;cursor:pointer;border-bottom:2px solid transparent;font-size:13px;font-weight:600;color:var(--muted);transition:all .2s}
+.tab:hover{color:var(--accent);background:var(--accent-soft)}
+.tab.active{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);font-weight:700}
 .tabpanes>div{display:none}.tabpanes>div.active{display:block}
 .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
-.bigbtn{cursor:pointer;font-size:16px;min-height:48px;padding:10px 12px;border-radius:12px;border:1px solid #334155;background:#111827;color:var(--text);width:100%;text-align:left}
+.bigbtn{cursor:pointer;font-size:14px;font-weight:600;min-height:48px;padding:11px 14px;border-radius:12px;border:1px solid var(--line);background:#fff;color:var(--ink);width:100%;text-align:left;transition:all .2s;font-family:inherit}
+.bigbtn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);transform:translateY(-1px);box-shadow:var(--shadow-sm)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.kv{display:flex;justify-content:space-between;gap:8px;margin:6px 0}
-.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-.mono.discount{color:#4ade80}
+.kv{display:flex;justify-content:space-between;gap:8px;margin:6px 0;font-size:13px}
+.kv b,.kv strong{color:var(--ink)}
+.mono{font-family:'Inter','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.mono.discount{color:var(--green)}
 .muted{color:var(--muted)}
 hr{border:0;border-top:1px solid var(--line);margin:10px 0}
-#toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:60}
-.toast{min-width:260px;max-width:420px;border-radius:12px;padding:10px 12px;border:1px solid #1f2f3f;background:#0e1a26;box-shadow:0 8px 24px rgba(0,0,0,.35);animation:slide .22s ease-out}
-.toast.ok{border-color:#214a2c;background:#0f2615}.toast.err{border-color:#5c2328;background:#1a0e12}
+#toasts{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:60}
+.toast{min-width:260px;max-width:420px;border-radius:12px;padding:12px 14px;border:1px solid var(--line);background:#fff;color:var(--ink);box-shadow:0 12px 32px rgba(10,10,15,.12);animation:slide .22s ease-out}
+.toast.ok{border-color:#86efac;background:#f0fdf4;color:#14532d}
+.toast.err{border-color:#fca5a5;background:#fef2f2;color:#7f1d1d}
 .toast .title{font-weight:700;margin-bottom:4px}
 @keyframes slide{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}
-.badge{display:inline-block;padding:2px 6px;border-radius:999px;font-size:11px;border:1px solid rgba(255,255,255,.35)}
-.badge.on{background:#14532d;border-color:#22c55e}
-.badge.off{background:#2c1b1b;border-color:#ef4444}
+.badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;border:1px solid var(--line);background:#fff;color:var(--body);font-weight:600}
+.badge.on{background:#f0fdf4;border-color:#86efac;color:#14532d}
+.badge.off{background:#fef2f2;border-color:#fca5a5;color:#7f1d1d}
 
 /* タイマーカード */
 #timerCard{border:2px solid transparent;transition:border-color .3s}
-#timerCard .cbody{background:linear-gradient(135deg,#0c1626,#0a1423)}
+#timerCard .cbody{background:linear-gradient(135deg,#fff 0%,var(--accent-soft) 100%)}
 
 /* 数量コントローラ */
-.itemRow{display:flex;align-items:center;gap:8px;border:1px solid #2a384f;border-radius:10px;padding:8px}
-.itemName{flex:1}
+.itemRow{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff;transition:all .2s}
+.itemRow:hover{border-color:var(--accent);box-shadow:var(--shadow-sm)}
+.itemName{flex:1;font-size:13px;font-weight:500}
 .qtyCtrl{display:flex;align-items:center;gap:6px}
-.qtyCtrl button{width:34px;height:34px;border-radius:10px;border:1px solid #32445f;background:#0f1a2a;color:#e5e7eb;font-size:18px;cursor:pointer}
-.qtyCtrl .val{min-width:28px;text-align:center;font-weight:700}
+.qtyCtrl button{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--ink);font-size:18px;font-weight:700;cursor:pointer;transition:all .15s}
+.qtyCtrl button:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.qtyCtrl .val{min-width:28px;text-align:center;font-weight:700;font-family:'Inter',sans-serif}
 
 /* ハンバーガーメニュー */
-.hamburger{display:none;background:none;border:1px solid #334155;border-radius:8px;color:var(--text);font-size:22px;padding:6px 10px;cursor:pointer;line-height:1}
-.nav-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:90}
-.nav-drawer{display:none;position:fixed;top:0;right:0;width:260px;height:100%;background:#0f172a;border-left:1px solid var(--line);z-index:91;overflow-y:auto;padding:16px;flex-direction:column;gap:6px}
+.hamburger{display:none;background:#fff;border:1px solid var(--line);border-radius:10px;color:var(--ink);font-size:20px;padding:6px 12px;cursor:pointer;line-height:1;transition:all .2s}
+.hamburger:hover{border-color:var(--accent);color:var(--accent)}
+.nav-overlay{display:none;position:fixed;inset:0;background:rgba(10,10,15,.5);backdrop-filter:blur(4px);z-index:90}
+.nav-drawer{display:none;position:fixed;top:0;right:0;width:280px;height:100%;background:#fff;border-left:1px solid var(--line);z-index:91;overflow-y:auto;padding:18px;flex-direction:column;gap:6px;box-shadow:-12px 0 32px rgba(10,10,15,.1)}
 .nav-drawer.open{display:flex}
 .nav-overlay.open{display:block}
-.nav-drawer a{display:block;padding:12px 14px;border-radius:10px;font-size:15px;text-decoration:none;border:1px solid #1f2937}
-.nav-drawer a:active{background:#1e293b}
+.nav-drawer a{display:block;padding:12px 16px;border-radius:10px;font-size:14px;font-weight:600;text-decoration:none;border:1px solid var(--line);background:#fff;color:var(--ink);transition:all .15s}
+.nav-drawer a:hover,.nav-drawer a:active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 .nav-close{background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer;align-self:flex-end;padding:4px 8px}
 
 /* iPad横タブ切替 */
-.ipad-tabs{display:none;border-bottom:1px solid var(--line);background:var(--card)}
-.ipad-tabs button{flex:1;padding:14px 8px;font-size:16px;font-weight:700;background:none;border:none;border-bottom:3px solid transparent;color:var(--muted);cursor:pointer}
-.ipad-tabs button.active{border-color:var(--accent);color:var(--text)}
+.ipad-tabs{display:none;border-bottom:1px solid var(--line);background:#fff}
+.ipad-tabs button{flex:1;padding:14px 8px;font-size:15px;font-weight:700;background:none;border:none;border-bottom:3px solid transparent;color:var(--muted);cursor:pointer;font-family:inherit;transition:all .2s}
+.ipad-tabs button.active{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+
+/* Admin nav links（ヘッダー内ナビ） */
+#adminNav a{
+  display:inline-block;font-size:12px !important;padding:6px 11px !important;border-radius:999px !important;
+  border:1px solid var(--line) !important;text-decoration:none;font-weight:600 !important;
+  background:#fff;color:var(--body) !important;transition:all .15s;
+}
+#adminNav a:hover{border-color:var(--accent) !important;color:var(--accent) !important;background:var(--accent-soft)}
 
 /* iPad横向き (1024px以下) */
 @media(max-width:1100px){
@@ -2463,6 +2564,7 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
     <a href="/ui/mail" target="_blank" style="color:#f59e0b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #f59e0b44;text-decoration:none">メール</a>
     <a href="/ui/attendance" target="_blank" class="admin-link" style="color:#22c55e;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #22c55e44;text-decoration:none;font-weight:700">出退勤</a>
     <a href="/ui/subscription" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">サブスク</a>
+    <a href="/ui/import" target="_blank" class="admin-link" style="color:#f59e0b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #f59e0b44;text-decoration:none;font-weight:700">📦 データ移行</a>
   </div>
   <div class="muted" style="margin-left:auto;white-space:nowrap;display:flex;align-items:center;gap:8px">
     <span id="selTable" class="mono" style="font-size:16px;font-weight:700;color:var(--accent)">-</span>
@@ -2503,8 +2605,8 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
   <section class="panel ipad-active" id="floorPanel">
     <h2>フロア
       <span id="tableEditBtns" style="display:none;margin-left:12px">
-        <button class="btn" onclick="addTable()" style="font-size:12px;padding:4px 10px;background:#14532d;border-color:#22c55e;color:#4ade80">+ テーブル追加</button>
-        <button class="btn" onclick="removeTable()" style="font-size:12px;padding:4px 10px;background:#7f1d1d;border-color:#ef4444;color:#fca5a5">- 選択テーブル削除</button>
+        <button class="btn" onclick="addTable()" style="font-size:12px;padding:5px 12px;background:#f0fdf4;border-color:#86efac;color:#15803d;font-weight:700">+ テーブル追加</button>
+        <button class="btn" onclick="removeTable()" style="font-size:12px;padding:5px 12px;background:#fef2f2;border-color:#fecaca;color:#b91c1c;font-weight:700">- 選択テーブル削除</button>
       </span>
       <span id="floorClock" class="mono muted" style="float:right;font-size:14px"></span>
     </h2>
@@ -2525,7 +2627,7 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
           </div>
           <div id="autoExtendBadge" class="badge off" style="font-size:10px">自動延長: OFF</div>
         </div>
-        <div id="timerBar" style="height:6px;border-radius:3px;background:#1e293b;margin-top:8px;overflow:hidden">
+        <div id="timerBar" style="height:6px;border-radius:3px;background:#f3f3f6;margin-top:8px;overflow:hidden">
           <div id="timerBarFill" style="height:100%;border-radius:3px;background:#22c55e;width:0%;transition:width .5s"></div>
         </div>
       </div>
@@ -2549,26 +2651,26 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
                 <option value="1">1名</option><option value="2">2名</option><option value="3">3名</option>
                 <option value="4">4名</option><option value="5">5名</option><option value="6">6名</option>
               </select>
-              <button class="bigbtn" id="btnCheckin" style="flex:1;text-align:center;background:#0e7490;border-color:#0e7490;color:#fff;font-weight:700">入店</button>
+              <button class="bigbtn solid" id="btnCheckin" style="flex:1;text-align:center;font-weight:700">入店</button>
             </div>
             <!-- 延長ボタンエリア（JS で動的に描画）-->
             <div id="extendBtnsArea" style="margin-bottom:8px"></div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
               <button class="bigbtn" id="btnAutoExtend" style="text-align:center;font-size:12px">自動延長 OFF</button>
-              <button class="bigbtn" id="btnChangeGuest" style="text-align:center;font-size:12px;background:#1a2744;border-color:#3b82f6;color:#93c5fd">人数変更</button>
-              <button class="bigbtn" id="btnMoveTable" style="text-align:center;font-size:12px;background:#1a2744;border-color:#3b82f6;color:#93c5fd">席変更</button>
+              <button class="bigbtn" id="btnChangeGuest" style="text-align:center;font-size:12px;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8">人数変更</button>
+              <button class="bigbtn" id="btnMoveTable" style="text-align:center;font-size:12px;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8">席変更</button>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
-              <button class="bigbtn" id="btnChangeStart" style="text-align:center;font-size:12px;background:#1a2744;border-color:#3b82f6;color:#93c5fd">時間変更</button>
-              <button class="bigbtn" id="btnDouhan" style="text-align:center;font-size:12px;background:#4a1942;border-color:#e879f9;color:#f0abfc;font-weight:700">同伴</button>
-              <button class="bigbtn" id="btnDiscount" style="text-align:center;font-size:12px;background:#14352a;border-color:#4ade80;color:#4ade80;font-weight:700">割引</button>
+              <button class="bigbtn" id="btnChangeStart" style="text-align:center;font-size:12px;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8">時間変更</button>
+              <button class="bigbtn" id="btnDouhan" style="text-align:center;font-size:12px;background:#fdf0f7;border-color:#f9a8d4;color:#b03468;font-weight:700">同伴</button>
+              <button class="bigbtn" id="btnDiscount" style="text-align:center;font-size:12px;background:#f0fdf4;border-color:#86efac;color:#15803d;font-weight:700">割引</button>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
-              <button class="bigbtn" id="btnNomHon" style="text-align:center;font-size:12px;background:#1c1a3a;border-color:#818cf8;color:#c7d2fe;font-weight:700">本指名+</button>
-              <button class="bigbtn" id="btnNomJyonai" style="text-align:center;font-size:12px;background:#1c1a3a;border-color:#818cf8;color:#c7d2fe;font-weight:700">場内指名+</button>
+              <button class="bigbtn" id="btnNomHon" style="text-align:center;font-size:12px;background:#fdf0f7;border-color:#d64583;color:#b03468;font-weight:700">本指名+</button>
+              <button class="bigbtn" id="btnNomJyonai" style="text-align:center;font-size:12px;background:#fdf0f7;border-color:#d64583;color:#b03468;font-weight:700">場内指名+</button>
             </div>
             <div style="display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:8px">
-              <button class="bigbtn" id="btnCancelCheckin" style="text-align:center;font-size:12px;color:#fca5a5;border-color:#7f1d1d">入店取消</button>
+              <button class="bigbtn" id="btnCancelCheckin" style="text-align:center;font-size:12px;color:#b91c1c;border-color:#fecaca;background:#fef2f2">入店取消</button>
             </div>
             <hr>
             <!-- 支払いエリア -->
@@ -2578,9 +2680,9 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
                 <input id="payAmount" style="flex:1;font-size:18px;padding:10px;text-align:right;font-weight:700" placeholder="金額" type="number">
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-                <button class="bigbtn" id="btnPayCash" style="text-align:center;font-size:14px;background:#14532d;border-color:#22c55e;color:#4ade80">現金</button>
-                <button class="bigbtn" id="btnPayCard" style="text-align:center;font-size:14px;background:#1e3a5f;border-color:#3b82f6;color:#93c5fd">カード</button>
-                <button class="bigbtn" id="btnPayQR" style="text-align:center;font-size:14px;background:#3b0764;border-color:#a855f7;color:#c084fc">QR</button>
+                <button class="bigbtn" id="btnPayCash" style="text-align:center;font-size:14px;background:#f0fdf4;border-color:#86efac;color:#15803d;font-weight:700">💵 現金</button>
+                <button class="bigbtn" id="btnPayCard" style="text-align:center;font-size:14px;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;font-weight:700">💳 カード</button>
+                <button class="bigbtn" id="btnPayQR" style="text-align:center;font-size:14px;background:#faf5ff;border-color:#d8b4fe;color:#7e22ce;font-weight:700">📱 QR</button>
               </div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
@@ -2594,9 +2696,9 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
 
           <!-- 数量管理：各カテゴリ 0スタート + / - -->
           <div id="pane-drink">
-            <div style="margin-bottom:10px;padding:8px;border:1px solid #2a384f;border-radius:10px;background:#0a1624">
-              <div style="font-size:12px;color:var(--muted);margin-bottom:4px">ドリンクバック対象キャスト</div>
-              <select id="drinkCastSelect" style="width:100%;font-size:15px;padding:8px 10px;border-radius:8px;border:1px solid #263244;background:var(--card);color:var(--text)">
+            <div style="margin-bottom:10px;padding:10px 12px;border:1px solid var(--accent);border-radius:10px;background:var(--accent-soft)">
+              <div style="font-size:11px;color:var(--accent);font-weight:700;letter-spacing:.05em;margin-bottom:6px">ドリンクバック対象キャスト</div>
+              <select id="drinkCastSelect" style="width:100%;font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink)">
                 <option value="">なし（お客様用）</option>
               </select>
             </div>
@@ -2606,9 +2708,9 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
             </div>
           </div>
           <div id="pane-bottle">
-            <div style="margin-bottom:10px;padding:8px;border:1px solid #2a384f;border-radius:10px;background:#0a1624">
-              <div style="font-size:12px;color:var(--muted);margin-bottom:4px">ボトルバック対象キャスト</div>
-              <select id="bottleCastSelect" style="width:100%;font-size:15px;padding:8px 10px;border-radius:8px;border:1px solid #263244;background:var(--card);color:var(--text)">
+            <div style="margin-bottom:10px;padding:10px 12px;border:1px solid var(--accent);border-radius:10px;background:var(--accent-soft)">
+              <div style="font-size:11px;color:var(--accent);font-weight:700;letter-spacing:.05em;margin-bottom:6px">ボトルバック対象キャスト</div>
+              <select id="bottleCastSelect" style="width:100%;font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink)">
                 <option value="">なし（テーブルボトル）</option>
               </select>
             </div>
@@ -2845,7 +2947,7 @@ function renderExtendButtons(){
     const btns = opts.map(o =>
       `<button class="bigbtn" style="text-align:center;font-size:12px;padding:6px 4px"
          onclick="extendWithOption(${o.id},${o.minutes},${o.price},'${(o.label||'').replace(/'/g,'\\\'')}')" >
-         延長 ${o.label}<br><small style="color:#94a3b8">¥${Math.round(o.price).toLocaleString()}/人</small></button>`
+         延長 ${o.label}<br><small style="color:#8a8a95;font-weight:500">¥${Math.round(o.price).toLocaleString()}/人</small></button>`
     ).join('');
     area.innerHTML = `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:6px;margin-bottom:4px">${btns}</div>
       <button class="bigbtn" id="btnUnextend" style="width:100%;text-align:center;font-size:12px">延長取消</button>`;
@@ -3153,18 +3255,18 @@ function showSetPlanModal(gc, plans){
     modal=document.createElement('div');
     modal.id='setPlanModal';
     modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:300;display:flex;align-items:center;justify-content:center';
-    modal.innerHTML=`<div style="background:#0f172a;border:1px solid #1f2937;border-radius:16px;padding:24px;min-width:300px;max-width:420px;width:90%">
-      <h3 style="margin:0 0 16px;font-size:16px;color:#e5e7eb">コース選択</h3>
+    modal.innerHTML=`<div style="background:#ffffff;border:1px solid #eaeaef;border-radius:16px;padding:24px;min-width:300px;max-width:420px;width:90%;box-shadow:0 20px 50px rgba(10,10,15,.18)">
+      <h3 style="margin:0 0 16px;font-size:16px;color:#0a0a0f;font-weight:700">コース選択</h3>
       <div id="setPlanBtns" style="display:flex;flex-direction:column;gap:10px"></div>
-      <button onclick="document.getElementById('setPlanModal').style.display='none'" style="margin-top:14px;width:100%;padding:10px;border-radius:8px;border:1px solid #374151;background:#111827;color:#9ca3af;cursor:pointer;font-size:14px">キャンセル</button>
+      <button onclick="document.getElementById('setPlanModal').style.display='none'" style="margin-top:14px;width:100%;padding:10px;border-radius:8px;border:1px solid #eaeaef;background:#fff;color:#4a4a55;cursor:pointer;font-size:14px;font-weight:600">キャンセル</button>
     </div>`;
     document.body.appendChild(modal);
   }
   $('setPlanBtns').innerHTML=plans.map(p=>
     `<button onclick="checkinWithPlan(${p.id})"
-      style="padding:14px 16px;border-radius:10px;border:1px solid #0ea5e9;background:#082f49;color:#e5e7eb;cursor:pointer;font-size:15px;text-align:left;width:100%">
-      <div style="font-weight:700">${p.label}</div>
-      <div style="font-size:13px;color:#94a3b8;margin-top:3px">${p.minutes}分 · ¥${Math.round(p.price).toLocaleString()}/人</div>
+      style="padding:14px 16px;border-radius:10px;border:1px solid #d64583;background:#fdf0f7;color:#0a0a0f;cursor:pointer;font-size:15px;text-align:left;width:100%;font-weight:600;transition:all .2s">
+      <div style="font-weight:700;color:#0a0a0f">${p.label}</div>
+      <div style="font-size:13px;color:#b03468;margin-top:3px;font-weight:500">${p.minutes}分 · ¥${Math.round(p.price).toLocaleString()}/人</div>
     </button>`).join('');
   modal.style.display='flex';
 }
@@ -3708,7 +3810,7 @@ def ui_audit():
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>監査ログ</title>
 <style>
-:root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#b0bec5;--accent:#0ea5e9}
+:root{--bg:#fafafa;--card:#ffffff;--card2:#ffffff;--line:#eaeaef;--border:#eaeaef;--text:#0a0a0f;--ink:#0a0a0f;--muted:#8a8a95;--body:#4a4a55;--accent:#d64583;--accent-soft:#fdf0f7;--accent-dark:#b03468;--gold:#c9a96e;--gold-soft:#faf3e3;--warn:#f59e0b;--amber:#f59e0b;--err:#ef4444;--red:#ef4444;--ok:#22c55e;--green:#22c55e;--blue:#3b82f6;--purple:#a855f7;}
 *{box-sizing:border-box;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
 body{margin:0;background:var(--bg);color:var(--text);padding:20px}
 h1{font-size:22px;margin-bottom:16px}
@@ -3720,6 +3822,39 @@ th{background:#111827;font-size:11px;color:var(--muted);position:sticky;top:0}
 .PATCH{background:#713f12;color:#fcd34d}.PUT{background:#1e3a5f;color:#93c5fd}
 a{color:var(--accent)}
 .toolbar{display:flex;gap:10px;margin-bottom:16px;align-items:center}
+
+/* === Premium Pink Theme Override (auto-injected) === */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap');
+body{font-family:'Inter','Noto Sans JP',-apple-system,system-ui,Segoe UI,Roboto,sans-serif !important;background:#fafafa !important;color:#0a0a0f !important;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{color:#0a0a0f}
+a{color:#d64583}
+.card,section,article{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.stat,.kpi,.tile,.metric{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f}
+table{border-color:#eaeaef !important}
+th{background:#fafafa !important;color:#4a4a55 !important;border-color:#eaeaef !important;font-weight:700 !important}
+td{border-color:#f3f3f6 !important;color:#0a0a0f !important;background:#ffffff}
+tr:nth-child(even) td{background:#fafafa}
+.btn{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f !important;font-weight:600 !important;transition:all .2s}
+.btn:hover{border-color:#d64583 !important;color:#d64583 !important}
+.btn.primary,.btn.solid{background:#d64583 !important;border-color:#d64583 !important;color:#ffffff !important}
+.btn.danger{background:#ef4444 !important;border-color:#ef4444 !important;color:#ffffff !important}
+input,select,textarea{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f !important}
+input:focus,select:focus{border-color:#d64583 !important;box-shadow:0 0 0 3px #fdf0f7 !important;outline:none}
+.method.POST{background:#f0fdf4 !important;color:#15803d !important}
+.method.DELETE{background:#fef2f2 !important;color:#b91c1c !important}
+.method.PATCH{background:#fff7ed !important;color:#c2410c !important}
+.method.PUT{background:#eff6ff !important;color:#1d4ed8 !important}
+.cast-card{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.cast-card.in .status{background:#f0fdf4 !important;color:#15803d !important}
+.cast-card.out .status{background:#fafafa !important;color:#8a8a95 !important}
+.bar{background:#ffffff !important;border-color:#eaeaef}
+.notice{background:#fff7ed !important;color:#7c2d12 !important;border-left:3px solid #f59e0b !important}
+.modal-card{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.toast.ok{background:#f0fdf4 !important;color:#14532d !important;border-color:#86efac !important}
+.toast.err{background:#fef2f2 !important;color:#7f1d1d !important;border-color:#fca5a5 !important}
+[style*="background:#111827"],[style*="background:#0f172a"],[style*="background:#0a1220"],[style*="background:#0e1a26"]{background:#ffffff !important;color:#0a0a0f !important}
+[style*="border:1px solid #263244"],[style*="border:1px solid #334155"]{border-color:#eaeaef !important}
+
 </style></head><body>
 <h1>📋 監査ログ</h1>
 <div class="toolbar">
@@ -3764,7 +3899,7 @@ def ui_attendance():
 })();
 </script>
 <style>
-:root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--accent:#0ea5e9;--green:#22c55e;--red:#ef4444}
+:root{--bg:#fafafa;--card:#ffffff;--card2:#ffffff;--line:#eaeaef;--border:#eaeaef;--text:#0a0a0f;--ink:#0a0a0f;--muted:#8a8a95;--body:#4a4a55;--accent:#d64583;--accent-soft:#fdf0f7;--accent-dark:#b03468;--gold:#c9a96e;--gold-soft:#faf3e3;--warn:#f59e0b;--amber:#f59e0b;--err:#ef4444;--red:#ef4444;--ok:#22c55e;--green:#22c55e;--blue:#3b82f6;--purple:#a855f7;}
 *{box-sizing:border-box;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
 body{margin:0;background:var(--bg);color:var(--text)}
 header{position:sticky;top:0;z-index:40;display:flex;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line);background:rgba(11,18,32,.95);backdrop-filter:blur(6px)}
@@ -3802,6 +3937,39 @@ header h1{margin:0;font-size:18px}
   .cast-card .name{font-size:17px}
   .clock{font-size:36px}
 }
+
+/* === Premium Pink Theme Override (auto-injected) === */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap');
+body{font-family:'Inter','Noto Sans JP',-apple-system,system-ui,Segoe UI,Roboto,sans-serif !important;background:#fafafa !important;color:#0a0a0f !important;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{color:#0a0a0f}
+a{color:#d64583}
+.card,section,article{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.stat,.kpi,.tile,.metric{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f}
+table{border-color:#eaeaef !important}
+th{background:#fafafa !important;color:#4a4a55 !important;border-color:#eaeaef !important;font-weight:700 !important}
+td{border-color:#f3f3f6 !important;color:#0a0a0f !important;background:#ffffff}
+tr:nth-child(even) td{background:#fafafa}
+.btn{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f !important;font-weight:600 !important;transition:all .2s}
+.btn:hover{border-color:#d64583 !important;color:#d64583 !important}
+.btn.primary,.btn.solid{background:#d64583 !important;border-color:#d64583 !important;color:#ffffff !important}
+.btn.danger{background:#ef4444 !important;border-color:#ef4444 !important;color:#ffffff !important}
+input,select,textarea{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f !important}
+input:focus,select:focus{border-color:#d64583 !important;box-shadow:0 0 0 3px #fdf0f7 !important;outline:none}
+.method.POST{background:#f0fdf4 !important;color:#15803d !important}
+.method.DELETE{background:#fef2f2 !important;color:#b91c1c !important}
+.method.PATCH{background:#fff7ed !important;color:#c2410c !important}
+.method.PUT{background:#eff6ff !important;color:#1d4ed8 !important}
+.cast-card{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.cast-card.in .status{background:#f0fdf4 !important;color:#15803d !important}
+.cast-card.out .status{background:#fafafa !important;color:#8a8a95 !important}
+.bar{background:#ffffff !important;border-color:#eaeaef}
+.notice{background:#fff7ed !important;color:#7c2d12 !important;border-left:3px solid #f59e0b !important}
+.modal-card{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.toast.ok{background:#f0fdf4 !important;color:#14532d !important;border-color:#86efac !important}
+.toast.err{background:#fef2f2 !important;color:#7f1d1d !important;border-color:#fca5a5 !important}
+[style*="background:#111827"],[style*="background:#0f172a"],[style*="background:#0a1220"],[style*="background:#0e1a26"]{background:#ffffff !important;color:#0a0a0f !important}
+[style*="border:1px solid #263244"],[style*="border:1px solid #334155"]{border-color:#eaeaef !important}
+
 </style></head><body>
 <header>
   <h1>出退勤</h1>
@@ -3986,7 +4154,7 @@ def ui_attendance_manage():
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>出退勤 修正 - Girls Bar POS</title>
 <style>
-:root{--bg:#0b1220;--card:#0f172a;--line:#1f2937;--text:#e5e7eb;--muted:#94a3b8;--accent:#0ea5e9;--green:#22c55e;--red:#ef4444;--amber:#f59e0b}
+:root{--bg:#fafafa;--card:#ffffff;--card2:#ffffff;--line:#eaeaef;--border:#eaeaef;--text:#0a0a0f;--ink:#0a0a0f;--muted:#8a8a95;--body:#4a4a55;--accent:#d64583;--accent-soft:#fdf0f7;--accent-dark:#b03468;--gold:#c9a96e;--gold-soft:#faf3e3;--warn:#f59e0b;--amber:#f59e0b;--err:#ef4444;--red:#ef4444;--ok:#22c55e;--green:#22c55e;--blue:#3b82f6;--purple:#a855f7;}
 *{box-sizing:border-box;font-family:-apple-system,system-ui,"Noto Sans JP",sans-serif}
 body{margin:0;background:var(--bg);color:var(--text)}
 header{position:sticky;top:0;z-index:40;display:flex;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line);background:rgba(11,18,32,.95)}
@@ -4018,6 +4186,39 @@ tr:last-child td{border-bottom:none}
 .toast{position:fixed;bottom:20px;right:20px;padding:12px 18px;border-radius:10px;font-size:14px;font-weight:700;z-index:200}
 .toast.ok{background:#14532d;border:1px solid var(--green);color:#86efac}
 .toast.err{background:#450a0a;border:1px solid var(--red);color:#fca5a5}
+
+/* === Premium Pink Theme Override (auto-injected) === */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap');
+body{font-family:'Inter','Noto Sans JP',-apple-system,system-ui,Segoe UI,Roboto,sans-serif !important;background:#fafafa !important;color:#0a0a0f !important;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{color:#0a0a0f}
+a{color:#d64583}
+.card,section,article{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.stat,.kpi,.tile,.metric{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f}
+table{border-color:#eaeaef !important}
+th{background:#fafafa !important;color:#4a4a55 !important;border-color:#eaeaef !important;font-weight:700 !important}
+td{border-color:#f3f3f6 !important;color:#0a0a0f !important;background:#ffffff}
+tr:nth-child(even) td{background:#fafafa}
+.btn{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f !important;font-weight:600 !important;transition:all .2s}
+.btn:hover{border-color:#d64583 !important;color:#d64583 !important}
+.btn.primary,.btn.solid{background:#d64583 !important;border-color:#d64583 !important;color:#ffffff !important}
+.btn.danger{background:#ef4444 !important;border-color:#ef4444 !important;color:#ffffff !important}
+input,select,textarea{background:#ffffff !important;border:1px solid #eaeaef !important;color:#0a0a0f !important}
+input:focus,select:focus{border-color:#d64583 !important;box-shadow:0 0 0 3px #fdf0f7 !important;outline:none}
+.method.POST{background:#f0fdf4 !important;color:#15803d !important}
+.method.DELETE{background:#fef2f2 !important;color:#b91c1c !important}
+.method.PATCH{background:#fff7ed !important;color:#c2410c !important}
+.method.PUT{background:#eff6ff !important;color:#1d4ed8 !important}
+.cast-card{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.cast-card.in .status{background:#f0fdf4 !important;color:#15803d !important}
+.cast-card.out .status{background:#fafafa !important;color:#8a8a95 !important}
+.bar{background:#ffffff !important;border-color:#eaeaef}
+.notice{background:#fff7ed !important;color:#7c2d12 !important;border-left:3px solid #f59e0b !important}
+.modal-card{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.toast.ok{background:#f0fdf4 !important;color:#14532d !important;border-color:#86efac !important}
+.toast.err{background:#fef2f2 !important;color:#7f1d1d !important;border-color:#fca5a5 !important}
+[style*="background:#111827"],[style*="background:#0f172a"],[style*="background:#0a1220"],[style*="background:#0e1a26"]{background:#ffffff !important;color:#0a0a0f !important}
+[style*="border:1px solid #263244"],[style*="border:1px solid #334155"]{border-color:#eaeaef !important}
+
 </style></head><body>
 <header>
   <h1>📋 出退勤 修正・追加（オーナー限定）</h1>

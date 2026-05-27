@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Concept D: Glassmorphism — NEXUS POS</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+JP:wght@300;400;500;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#1a0d1f;
+  --body:rgba(26,13,31,.7);
+  --muted:rgba(26,13,31,.45);
+  --glass:rgba(255,255,255,.55);
+  --glass2:rgba(255,255,255,.35);
+  --glass-border:rgba(255,255,255,.7);
+  --accent:#d64583;
+  --accent2:#a855f7;
+  --gold:#fbbf24;
+  --green:#10b981;
+  --amber:#f59e0b;
+  --red:#ef4444;
+  --blue:#3b82f6;
+  --r:14px; --r2:22px; --r3:999px;
+}
+html,body{height:100%;font-family:'Inter','Noto Sans JP',sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+body{
+  display:flex;flex-direction:column;min-height:100vh;
+  background:
+    radial-gradient(at 20% 10%,#ffd6e8 0%,transparent 40%),
+    radial-gradient(at 80% 15%,#e0c8ff 0%,transparent 45%),
+    radial-gradient(at 40% 80%,#ffe0c8 0%,transparent 40%),
+    radial-gradient(at 90% 90%,#ffc8e0 0%,transparent 40%),
+    linear-gradient(135deg,#fff5fa 0%,#f0e7ff 100%);
+  background-attachment:fixed;
+  position:relative;
+  overflow-x:hidden;
+}
+body::before{
+  content:'';position:fixed;inset:-100px;z-index:-1;
+  background:
+    radial-gradient(circle at 25% 25%,rgba(214,69,131,.3) 0%,transparent 25%),
+    radial-gradient(circle at 75% 75%,rgba(168,85,247,.25) 0%,transparent 25%);
+  animation:float 20s ease-in-out infinite;
+}
+@keyframes float{0%,100%{transform:translate(0,0) rotate(0deg)}50%{transform:translate(40px,40px) rotate(5deg)}}
+
+.glass{background:var(--glass);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);border:1px solid var(--glass-border);box-shadow:0 8px 32px rgba(214,69,131,.08),inset 0 1px 0 rgba(255,255,255,.6)}
+
+/* HEADER */
+header{position:sticky;top:14px;z-index:50;margin:14px 18px 0;padding:0 24px;height:64px;border-radius:var(--r3);display:flex;align-items:center;gap:18px}
+.logo{display:flex;align-items:baseline;gap:10px}
+.logo .brand{font-weight:800;font-size:18px;letter-spacing:.05em;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.logo .sub{font-size:10px;color:var(--accent);letter-spacing:.25em;font-weight:700;padding:3px 9px;background:rgba(214,69,131,.1);border-radius:var(--r3)}
+.nav{display:flex;gap:2px;margin-left:auto;align-items:center}
+.nav a{font-size:13px;color:var(--body);padding:7px 14px;border-radius:var(--r3);text-decoration:none;font-weight:500;transition:all .25s}
+.nav a:hover{background:rgba(255,255,255,.5);color:var(--accent)}
+.nav a.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-weight:700;box-shadow:0 6px 20px rgba(214,69,131,.35)}
+.user-chip{display:flex;align-items:center;gap:8px;padding:7px 14px;background:rgba(255,255,255,.5);border-radius:var(--r3);font-size:12px;color:var(--ink);font-weight:600}
+.user-chip .dot{width:8px;height:8px;background:var(--green);border-radius:50%;box-shadow:0 0 0 3px rgba(16,185,129,.25)}
+
+/* HERO */
+.hero{padding:24px 18px 12px;display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr;gap:16px}
+.hero-main{padding:28px 32px;border-radius:var(--r2);position:relative;overflow:hidden;background:linear-gradient(135deg,rgba(255,255,255,.7) 0%,rgba(255,214,232,.5) 100%);backdrop-filter:blur(30px) saturate(150%);border:1px solid var(--glass-border);box-shadow:0 12px 40px rgba(214,69,131,.12),inset 0 1px 0 rgba(255,255,255,.8)}
+.hero-main::after{content:'';position:absolute;top:-40px;right:-40px;width:240px;height:240px;background:radial-gradient(circle,var(--accent) 0%,transparent 70%);opacity:.2;border-radius:50%}
+.hero-main .label{font-size:11px;color:var(--accent);font-weight:700;letter-spacing:.2em;margin-bottom:8px;position:relative}
+.hero-main .store{font-size:24px;font-weight:800;margin-bottom:18px;position:relative;letter-spacing:-.01em}
+.hero-main .revenue{display:flex;align-items:baseline;gap:6px;position:relative}
+.hero-main .revenue .yen{font-size:20px;color:var(--accent);font-weight:600}
+.hero-main .revenue .amt{font-size:48px;font-weight:800;letter-spacing:-.03em;background:linear-gradient(135deg,var(--accent) 0%,var(--accent2) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero-main .delta{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--green);font-weight:700;margin-top:10px;padding:4px 12px;background:rgba(16,185,129,.15);border-radius:var(--r3);backdrop-filter:blur(10px);position:relative}
+
+.kpi{padding:22px;border-radius:var(--r2);display:flex;flex-direction:column;justify-content:space-between;transition:all .3s;cursor:default;background:rgba(255,255,255,.55);backdrop-filter:blur(20px) saturate(140%);border:1px solid var(--glass-border);box-shadow:0 8px 24px rgba(214,69,131,.06),inset 0 1px 0 rgba(255,255,255,.7)}
+.kpi:hover{transform:translateY(-4px);box-shadow:0 16px 40px rgba(214,69,131,.15)}
+.kpi-label{font-size:11px;color:var(--accent);letter-spacing:.15em;text-transform:uppercase;font-weight:700}
+.kpi-val{font-size:28px;font-weight:700;letter-spacing:-.02em;color:var(--ink);margin-top:8px}
+.kpi-sub{font-size:11px;color:var(--muted);margin-top:4px;font-weight:500}
+.kpi-sub.up{color:var(--green);font-weight:700}
+
+/* PAGE */
+.page{flex:1;display:grid;grid-template-columns:1fr 420px;gap:18px;padding:12px 18px 24px}
+
+.panel{border-radius:var(--r2);overflow:hidden;background:rgba(255,255,255,.5);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);border:1px solid var(--glass-border);box-shadow:0 12px 40px rgba(214,69,131,.08),inset 0 1px 0 rgba(255,255,255,.7)}
+.panel-head{padding:18px 24px;border-bottom:1px solid rgba(255,255,255,.5);display:flex;align-items:center;gap:12px;background:rgba(255,255,255,.3)}
+.panel-head h2{font-size:14px;font-weight:700;color:var(--ink);letter-spacing:.03em}
+.panel-head .meta{margin-left:auto;font-size:12px;color:var(--body);display:flex;align-items:center;gap:12px;font-weight:500}
+.legend{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--body);font-weight:500}
+.legend .sw{width:10px;height:10px;border-radius:50%;box-shadow:0 2px 4px rgba(0,0,0,.1)}
+.legend .sw.free{background:rgba(255,255,255,.7);border:1px solid var(--muted)}
+.legend .sw.ok{background:var(--green)}
+.legend .sw.warn{background:var(--amber)}
+.legend .sw.over{background:var(--red)}
+.legend .sw.paid{background:var(--blue)}
+.clock{font-weight:700;color:var(--ink);background:rgba(255,255,255,.6);padding:5px 12px;border-radius:var(--r3)}
+
+/* FLOOR */
+.floor{padding:24px;min-height:540px}
+.floor-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px}
+
+.table{padding:18px 20px;cursor:pointer;transition:all .35s cubic-bezier(.4,0,.2,1);position:relative;overflow:hidden;min-height:138px;display:flex;flex-direction:column;justify-content:space-between;border-radius:var(--r2);background:rgba(255,255,255,.6);backdrop-filter:blur(16px) saturate(140%);border:1px solid var(--glass-border);box-shadow:0 6px 20px rgba(214,69,131,.06),inset 0 1px 0 rgba(255,255,255,.7)}
+.table:hover{transform:translateY(-5px) scale(1.02);box-shadow:0 16px 40px rgba(214,69,131,.18)}
+.table .t-name{font-weight:800;font-size:22px;letter-spacing:-.02em;color:var(--ink)}
+.table .t-status{font-size:10px;color:var(--body);letter-spacing:.1em;text-transform:uppercase;font-weight:700;margin-top:2px}
+.table .t-time{font-size:24px;font-weight:800;letter-spacing:-.03em;color:var(--ink)}
+.table .t-info{font-size:11px;color:var(--muted);margin-top:2px;font-weight:500}
+.table .t-nomi{font-size:10px;color:var(--accent);font-weight:700;margin-top:6px;letter-spacing:.05em}
+
+.table.sel{box-shadow:0 0 0 3px var(--accent),0 16px 40px rgba(214,69,131,.25);background:linear-gradient(135deg,rgba(255,255,255,.8) 0%,rgba(255,214,232,.6) 100%)}
+
+.table.t-free{background:rgba(255,255,255,.4)}
+.table.t-free .t-name{color:var(--muted)}
+
+.table.t-ok::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--green),#34d399);border-radius:var(--r2) var(--r2) 0 0}
+.table.t-warn::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--amber),#fcd34d);border-radius:var(--r2) var(--r2) 0 0}
+.table.t-warn .t-time{color:var(--amber)}
+.table.t-over::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--red),#fb7185);border-radius:var(--r2) var(--r2) 0 0}
+.table.t-over .t-time{color:var(--red)}
+.table.t-over{background:linear-gradient(135deg,rgba(254,226,226,.6) 0%,rgba(255,255,255,.4) 100%)}
+.table.t-paid::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--blue),#60a5fa);border-radius:var(--r2) var(--r2) 0 0}
+.table.t-paid{opacity:.7}
+.table.t-vip{background:linear-gradient(135deg,rgba(255,251,232,.7) 0%,rgba(254,243,199,.5) 100%);border:1px solid rgba(251,191,36,.4)}
+.table.t-vip::after{content:'✨';position:absolute;top:10px;right:12px;font-size:14px}
+.table.t-vip .t-name{background:linear-gradient(135deg,#f59e0b,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+
+/* OPS PANEL */
+.ops-tabs{display:flex;border-bottom:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.3);padding:6px 6px 0}
+.ops-tab{flex:1;padding:12px 0;text-align:center;font-size:12px;color:var(--body);font-weight:600;cursor:pointer;border-radius:var(--r) var(--r) 0 0;transition:all .25s;letter-spacing:.03em}
+.ops-tab:hover{color:var(--accent);background:rgba(255,255,255,.4)}
+.ops-tab.on{color:var(--accent);background:rgba(255,255,255,.7);font-weight:700}
+
+.ops-body{padding:22px;display:flex;flex-direction:column;gap:16px}
+
+.selected-table-card{padding:18px 22px;background:linear-gradient(135deg,rgba(214,69,131,.12) 0%,rgba(168,85,247,.08) 100%);backdrop-filter:blur(20px);border:1px solid rgba(214,69,131,.25);border-radius:var(--r);display:flex;justify-content:space-between;align-items:center}
+.selected-table-card .l .lbl{font-size:10px;color:var(--accent);font-weight:700;letter-spacing:.15em;text-transform:uppercase}
+.selected-table-card .l .tn{font-size:24px;font-weight:800;color:var(--ink);margin-top:4px;letter-spacing:-.02em}
+.selected-table-card .l .ti{font-size:11px;color:var(--body);margin-top:2px;font-weight:500}
+.selected-table-card .r{text-align:right}
+.selected-table-card .r .tot{font-size:26px;font-weight:800;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:-.02em}
+.selected-table-card .r .tl{font-size:10px;color:var(--accent);font-weight:700;letter-spacing:.15em;text-transform:uppercase}
+
+.input-row{display:flex;gap:8px;align-items:center}
+.input-row .ic{flex-shrink:0;width:38px;height:38px;border-radius:var(--r);background:linear-gradient(135deg,rgba(214,69,131,.15),rgba(168,85,247,.1));color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:14px;border:1px solid var(--glass-border);font-weight:700}
+.input-row select{flex:1;padding:11px 14px;border:1px solid var(--glass-border);border-radius:var(--r);background:rgba(255,255,255,.6);color:var(--ink);font-size:13px;font-family:inherit;outline:none;font-weight:600;backdrop-filter:blur(10px)}
+.input-row select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(214,69,131,.15)}
+
+.btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btn{cursor:pointer;font-size:12px;font-weight:600;padding:12px 14px;border-radius:var(--r);border:1px solid var(--glass-border);background:rgba(255,255,255,.5);color:var(--ink);font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;transition:all .25s;backdrop-filter:blur(12px)}
+.btn:hover{transform:translateY(-2px);background:rgba(255,255,255,.8);border-color:var(--accent);color:var(--accent);box-shadow:0 8px 20px rgba(214,69,131,.15)}
+.btn.grad{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border-color:transparent;font-weight:700;box-shadow:0 6px 18px rgba(214,69,131,.3)}
+.btn.grad:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(214,69,131,.45);color:#fff}
+.btn.full{grid-column:1/-1}
+
+.payment-bar{margin-top:8px;padding:18px;border-radius:var(--r2);position:relative;overflow:hidden;background:linear-gradient(135deg,rgba(26,13,31,.85),rgba(80,30,90,.75));backdrop-filter:blur(20px);color:#fff;border:1px solid rgba(255,255,255,.2)}
+.payment-bar .pl{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.payment-bar .pl .lbl{font-size:11px;color:rgba(255,255,255,.7);letter-spacing:.15em;font-weight:700;text-transform:uppercase}
+.payment-bar .pl .pamount{font-size:28px;font-weight:800;color:#fff;letter-spacing:-.02em}
+.payment-bar .pay-types{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.pay-btn{padding:11px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);border-radius:var(--r);color:#fff;cursor:pointer;font-size:12px;font-weight:700;transition:all .25s;backdrop-filter:blur(10px)}
+.pay-btn:hover{background:rgba(255,255,255,.25);transform:translateY(-1px)}
+
+/* CONCEPT BADGE */
+.concept-badge{position:fixed;bottom:20px;right:20px;z-index:100;padding:14px 22px;border-radius:var(--r3);font-size:13px;font-weight:700;display:flex;align-items:center;gap:10px;background:linear-gradient(135deg,rgba(255,255,255,.8),rgba(255,214,232,.7));backdrop-filter:blur(20px) saturate(140%);border:1px solid var(--glass-border);box-shadow:0 16px 40px rgba(214,69,131,.2)}
+.concept-badge .dot{width:10px;height:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:50%;box-shadow:0 0 12px var(--accent)}
+.concept-badge a{color:var(--accent);text-decoration:none;font-weight:700;margin-left:10px}
+.concept-badge a:hover{text-decoration:underline}
+
+@media(max-width:960px){
+  .hero{grid-template-columns:1fr 1fr}
+  .page{grid-template-columns:1fr}
+  .nav a:not(.active){display:none}
+}
+</style>
+</head>
+<body>
+
+<header class="glass">
+  <div class="logo"><span class="brand">NEXUS</span><span class="sub">POS</span></div>
+  <nav class="nav">
+    <a href="#" class="active">フロア</a>
+    <a href="#">分析</a>
+    <a href="#">締め</a>
+    <a href="#">顧客</a>
+    <a href="#">給与</a>
+    <a href="#">出退勤</a>
+  </nav>
+  <div class="user-chip"><span class="dot"></span>オーナー · Store 1</div>
+</header>
+
+<section class="hero">
+  <div class="hero-main">
+    <div class="label">本日 · 2026.05.27 火曜</div>
+    <div class="store">Bar LUNA（デモ）</div>
+    <div class="revenue"><span class="yen">¥</span><span class="amt">342,800</span></div>
+    <span class="delta">↑ 12.4% 先週比</span>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">客数</div>
+    <div>
+      <div class="kpi-val">28<span style="font-size:14px;color:var(--muted);font-weight:500"> 組</span></div>
+      <div class="kpi-sub up">+ 3 組</div>
+    </div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">客単価</div>
+    <div>
+      <div class="kpi-val">¥12,243</div>
+      <div class="kpi-sub up">+ 4.1%</div>
+    </div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">稼働</div>
+    <div>
+      <div class="kpi-val">5<span style="font-size:14px;color:var(--muted);font-weight:500"> / 10</span></div>
+      <div class="kpi-sub">稼働率 50%</div>
+    </div>
+  </div>
+</section>
+
+<main class="page">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>✨ フロア</h2>
+      <div class="meta">
+        <span class="legend"><span class="sw free"></span>空席</span>
+        <span class="legend"><span class="sw ok"></span>営業中</span>
+        <span class="legend"><span class="sw warn"></span>注意</span>
+        <span class="legend"><span class="sw over"></span>超過</span>
+        <span class="legend"><span class="sw paid"></span>会計済</span>
+        <span class="clock">22:48:07</span>
+      </div>
+    </div>
+    <div class="floor">
+      <div class="floor-grid">
+        <div class="table t-free"><div><div class="t-name">T1</div><div class="t-status">空席</div></div><div></div></div>
+        <div class="table t-ok sel"><div><div class="t-name">T2</div><div class="t-status">営業中</div></div><div><div class="t-time">42:18</div><div class="t-info">3名 · 22:15開始</div><div class="t-nomi">A:ゆかり</div></div></div>
+        <div class="table t-warn"><div><div class="t-name">T3</div><div class="t-status">残り 8分</div></div><div><div class="t-time">52:12</div><div class="t-info">2名 · 21:30開始</div><div class="t-nomi">A:なな</div></div></div>
+        <div class="table t-free"><div><div class="t-name">T4</div><div class="t-status">空席</div></div><div></div></div>
+        <div class="table t-over"><div><div class="t-name">T5</div><div class="t-status">超過 +14分</div></div><div><div class="t-time">74:35</div><div class="t-info">4名 · 21:00開始</div><div class="t-nomi">D:りん A:さくら</div></div></div>
+        <div class="table t-paid"><div><div class="t-name">T6</div><div class="t-status">会計済</div></div><div><div class="t-time">¥18,400</div><div class="t-info">2名 · 完了</div></div></div>
+        <div class="table t-ok"><div><div class="t-name">T7</div><div class="t-status">営業中</div></div><div><div class="t-time">15:02</div><div class="t-info">2名 · 22:45開始</div><div class="t-nomi">B:ほのか</div></div></div>
+        <div class="table t-free"><div><div class="t-name">T8</div><div class="t-status">空席</div></div><div></div></div>
+        <div class="table t-vip"><div><div class="t-name">VIP-1</div><div class="t-status">営業中 · VIP</div></div><div><div class="t-time">28:43</div><div class="t-info">4名 · 21:45開始</div><div class="t-nomi">A:みお D:ゆかり</div></div></div>
+        <div class="table t-vip t-free"><div><div class="t-name">VIP-2</div><div class="t-status">空席 · VIP</div></div><div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ops-tabs">
+      <div class="ops-tab on">入店 / 会計</div>
+      <div class="ops-tab">ドリンク</div>
+      <div class="ops-tab">ボトル</div>
+      <div class="ops-tab">フード</div>
+    </div>
+    <div class="ops-body">
+      <div class="selected-table-card">
+        <div class="l">
+          <div class="lbl">選択中</div>
+          <div class="tn">T2</div>
+          <div class="ti">3名 · 22:15開始 · 経過 42:18</div>
+        </div>
+        <div class="r">
+          <div class="lbl">会計</div>
+          <div class="tot">¥14,200</div>
+        </div>
+      </div>
+
+      <div class="input-row">
+        <div class="ic">👥</div>
+        <select><option>3名</option><option>1名</option><option>2名</option><option>4名</option></select>
+        <button class="btn grad">入店</button>
+      </div>
+
+      <div class="btn-grid">
+        <button class="btn">延長 +30分</button>
+        <button class="btn">取消 -30分</button>
+        <button class="btn">⏸ 自動延長 OFF</button>
+        <button class="btn">人数変更</button>
+        <button class="btn">席変更</button>
+        <button class="btn">時間変更</button>
+        <button class="btn" style="color:#a855f7">同伴</button>
+        <button class="btn" style="color:#10b981">割引</button>
+        <button class="btn grad full">✨ 本指名 + 場内指名</button>
+      </div>
+
+      <div class="payment-bar">
+        <div class="pl">
+          <span class="lbl">お支払い</span>
+          <span class="pamount">¥14,200</span>
+        </div>
+        <div class="pay-types">
+          <button class="pay-btn">💵 現金</button>
+          <button class="pay-btn">💳 カード</button>
+          <button class="pay-btn">📱 QR</button>
+        </div>
+        <button class="btn grad full" style="margin-top:10px">✓ 会計確定</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="concept-badge">
+  <span class="dot"></span>
+  Concept D · Glassmorphism
+  <a href="index.html">← 一覧へ</a>
+</div>
+
+</body>
+</html>

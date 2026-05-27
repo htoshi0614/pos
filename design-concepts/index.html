@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEXUS POS — デザインコンセプト 4案比較</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&family=Inter:wght@400;500;600;700;800&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#0a0a0f; --body:#4a4a55; --muted:#8a8a95;
+  --bg:#f7f7fb; --card:#fff; --line:#e8e8ee;
+  --pink:#d64583; --pink-soft:#fdf0f7;
+  --gold:#c9a96e; --gold-soft:#faf3e3;
+  --blue:#5b9dff; --blue-soft:#e8f1ff;
+  --purple:#a855f7; --purple-soft:#f5edff;
+}
+html,body{font-family:'Inter','Noto Sans JP',sans-serif;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+body{min-height:100vh;padding:60px 24px}
+.wrap{max-width:1240px;margin:0 auto}
+.head{text-align:center;margin-bottom:48px}
+.head .tag{display:inline-block;font-size:11px;letter-spacing:.25em;color:var(--pink);font-weight:700;padding:5px 14px;border:1px solid var(--pink);border-radius:999px;margin-bottom:18px}
+.head h1{font-size:38px;font-weight:800;letter-spacing:-.02em;margin-bottom:14px}
+.head h1 .grad{background:linear-gradient(135deg,var(--pink),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.head p{color:var(--body);font-size:15px;max-width:680px;margin:0 auto;line-height:1.7}
+
+.intro{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:28px 32px;margin-bottom:40px;display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+.intro .col h3{font-size:13px;font-weight:700;color:var(--pink);margin-bottom:8px;letter-spacing:.05em}
+.intro .col p{font-size:13px;color:var(--body);line-height:1.7}
+
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:40px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden;text-decoration:none;color:inherit;transition:all .3s;display:flex;flex-direction:column;position:relative}
+.card:hover{transform:translateY(-4px);box-shadow:0 20px 50px rgba(0,0,0,.1)}
+
+.preview{aspect-ratio:16/9;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:24px}
+.preview .frame{width:100%;height:100%;border-radius:10px;display:flex;flex-direction:column;overflow:hidden;position:relative;box-shadow:0 10px 30px rgba(0,0,0,.15)}
+.preview .topbar{height:18%;display:flex;align-items:center;padding:0 14px;gap:8px}
+.preview .topbar .lg{font-size:11px;font-weight:800;letter-spacing:.05em}
+.preview .topbar .dots{margin-left:auto;display:flex;gap:4px}
+.preview .topbar .dot{width:5px;height:5px;background:currentColor;border-radius:50%;opacity:.4}
+.preview .body{flex:1;display:grid;grid-template-columns:1.4fr 1fr;gap:8px;padding:0 14px 14px}
+.preview .floor{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+.preview .floor div{border-radius:4px}
+.preview .panel{display:flex;flex-direction:column;gap:5px}
+.preview .panel .blk{height:18%;border-radius:4px}
+
+/* A: Premium Pink preview */
+.p-A{background:linear-gradient(135deg,#fafafa 60%,#fdf0f7 100%)}
+.p-A .frame{background:#fff;border:1px solid #eaeaef}
+.p-A .topbar{background:rgba(255,255,255,.95);border-bottom:1px solid #eee;color:#d64583}
+.p-A .floor div{background:#fff;border:1.5px solid #eaeaef;border-top:2px solid var(--pink)}
+.p-A .floor div:nth-child(1),.p-A .floor div:nth-child(4),.p-A .floor div:nth-child(8){border-top-color:#eaeaef}
+.p-A .floor div:nth-child(3){border-top-color:#f59e0b}
+.p-A .floor div:nth-child(5){border-top-color:#ef4444;background:#fef2f2}
+.p-A .floor div:nth-child(2){border-color:var(--pink);background:#fdf0f7}
+.p-A .panel .blk{background:#fdf0f7}
+.p-A .panel .blk:nth-child(odd){background:#fff;border:1px solid #eaeaef}
+
+/* B: Night Luxe */
+.p-B{background:linear-gradient(135deg,#0d0a14,#251a3a)}
+.p-B .frame{background:#15101e;border:1px solid #3a2e4a}
+.p-B .topbar{background:rgba(13,10,20,.85);border-bottom:1px solid #2b2238;color:#c9a96e}
+.p-B .floor div{background:linear-gradient(160deg,#1f1830,#15101e);border:1px solid #3a2e4a}
+.p-B .floor div:nth-child(2){border-color:#c9a96e;background:linear-gradient(160deg,#2a2018,#1a1410)}
+.p-B .floor div:nth-child(3){border-top:2px solid #e8a13c}
+.p-B .floor div:nth-child(5){background:linear-gradient(160deg,#2a151c,#1a0d14)}
+.p-B .panel .blk{background:rgba(201,169,110,.1);border:1px solid #3a2e4a}
+.p-B .panel .blk:nth-child(2){background:linear-gradient(135deg,#c9a96e,#a07d3f)}
+
+/* C: Operational */
+.p-C{background:linear-gradient(135deg,#0f1118,#1a1d29)}
+.p-C .frame{background:#0f1118;border:1px solid #2d3242}
+.p-C .topbar{background:#1a1d29;border-bottom:1px solid #2d3242;color:#5b9dff}
+.p-C .floor{gap:3px}
+.p-C .floor div{background:#1f2330;border-left:3px solid #2d3242;border-radius:2px}
+.p-C .floor div:nth-child(2){border-left-color:#5b9dff;background:#1a2640}
+.p-C .floor div:nth-child(3){border-left-color:#f59e0b}
+.p-C .floor div:nth-child(5){border-left-color:#ef4444;background:#2a1717}
+.p-C .floor div:nth-child(6){border-left-color:#3b82f6;opacity:.6}
+.p-C .floor div:nth-child(7){border-left-color:#22c55e}
+.p-C .floor div:nth-child(9){border-left-color:#a855f7}
+.p-C .panel .blk{background:#1f2330;border:1px solid #2d3242;border-radius:3px}
+.p-C .panel .blk:nth-child(2){background:#5b9dff}
+
+/* D: Glassmorphism */
+.p-D{background:radial-gradient(at 20% 20%,#ffd6e8 0%,transparent 50%),radial-gradient(at 80% 80%,#e0c8ff 0%,transparent 50%),#fff5fa}
+.p-D .frame{background:rgba(255,255,255,.4);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.7);box-shadow:0 8px 24px rgba(214,69,131,.1)}
+.p-D .topbar{background:rgba(255,255,255,.5);border-bottom:1px solid rgba(255,255,255,.6);color:#d64583}
+.p-D .floor div{background:rgba(255,255,255,.6);border:1px solid rgba(255,255,255,.7);border-radius:6px}
+.p-D .floor div:nth-child(2){background:linear-gradient(135deg,rgba(255,255,255,.8),rgba(255,214,232,.6));box-shadow:0 0 0 2px #d64583}
+.p-D .floor div:nth-child(3){border-top:3px solid #f59e0b}
+.p-D .floor div:nth-child(5){background:linear-gradient(135deg,rgba(254,226,226,.6),rgba(255,255,255,.4));border-top:3px solid #ef4444}
+.p-D .floor div:nth-child(9){background:linear-gradient(135deg,rgba(255,251,232,.7),rgba(254,243,199,.5))}
+.p-D .panel .blk{background:rgba(255,255,255,.6);border:1px solid rgba(255,255,255,.7);border-radius:6px}
+.p-D .panel .blk:nth-child(2){background:linear-gradient(135deg,#d64583,#a855f7)}
+
+.info{padding:24px 28px;border-top:1px solid var(--line)}
+.info .top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.info .letter{font-size:11px;letter-spacing:.2em;font-weight:800;padding:4px 10px;border-radius:999px}
+.info .letter.a{background:var(--pink-soft);color:var(--pink)}
+.info .letter.b{background:#1a1426;color:var(--gold)}
+.info .letter.c{background:#1a1d29;color:var(--blue)}
+.info .letter.d{background:var(--purple-soft);color:var(--purple)}
+.info h2{font-size:22px;font-weight:800;letter-spacing:-.01em}
+.info p.desc{color:var(--body);font-size:13px;line-height:1.7;margin-bottom:14px}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.tags span{font-size:10px;padding:3px 9px;border-radius:999px;background:#f0f0f5;color:var(--body);font-weight:600;letter-spacing:.02em}
+.pros{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;margin-bottom:18px}
+.pros .pro{padding:8px 10px;background:#f7f7fb;border-radius:8px;color:var(--body)}
+.pros .pro b{color:var(--ink);margin-right:4px}
+.cta{display:flex;align-items:center;gap:10px;margin-top:auto}
+.cta .open{flex:1;padding:11px 18px;border-radius:10px;background:var(--ink);color:#fff;font-weight:700;font-size:13px;text-align:center;text-decoration:none;letter-spacing:.05em;transition:all .2s}
+.cta .open:hover{background:var(--pink)}
+.cta .pick{padding:11px 16px;border:1px solid var(--line);background:#fff;color:var(--body);border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;transition:all .2s}
+.cta .pick:hover{border-color:var(--pink);color:var(--pink)}
+
+/* Compare table */
+.compare{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px;margin-top:8px}
+.compare h2{font-size:18px;font-weight:800;margin-bottom:18px;letter-spacing:-.01em}
+.compare table{width:100%;border-collapse:collapse;font-size:13px}
+.compare th,.compare td{padding:12px 14px;text-align:left;border-bottom:1px solid var(--line)}
+.compare th{font-weight:700;color:var(--ink);background:#fafafa;font-size:12px;letter-spacing:.05em}
+.compare td:first-child{font-weight:600;color:var(--body)}
+.compare .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.05em}
+.compare .ba{background:var(--pink-soft);color:var(--pink)}
+.compare .bb{background:#1a1426;color:var(--gold)}
+.compare .bc{background:#1a1d29;color:var(--blue)}
+.compare .bd{background:var(--purple-soft);color:var(--purple)}
+
+.footer{text-align:center;color:var(--muted);font-size:12px;margin-top:50px;padding-top:30px;border-top:1px solid var(--line)}
+
+@media(max-width:760px){
+  .intro{grid-template-columns:1fr}
+  .grid{grid-template-columns:1fr}
+  .head h1{font-size:28px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <span class="tag">DESIGN CONCEPTS · 2026.05</span>
+    <h1>POSStart UI、<span class="grad">どれで進める？</span></h1>
+    <p>毎日触る POS のメイン画面を、4つの方向性で試作しました。<br>サムネをクリックすると実画面のモックが開きます。お好みの1案をお選びください。</p>
+  </div>
+
+  <div class="intro">
+    <div class="col">
+      <h3>① 今すぐ見たいと思わせる</h3>
+      <p>ファーストビューで店名・売上・状況が一目で入る。視覚的フックで「これだ」と思わせる。</p>
+    </div>
+    <div class="col">
+      <h3>② 使いこなせそうと思わせる</h3>
+      <p>テーブル状態・操作ボタンが直感的。迷わない・触れる導線で初日から動かせる。</p>
+    </div>
+    <div class="col">
+      <h3>③ 信頼できると思わせる</h3>
+      <p>余白・タイポ・色の一貫性でプロフェッショナル感。安いPOSではなく「使う価値がある」と感じる。</p>
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <!-- A -->
+    <a class="card" href="concept-A-premium-pink.html">
+      <div class="preview p-A">
+        <div class="frame">
+          <div class="topbar"><div class="lg">NEXUS POS</div><div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>
+          <div class="body">
+            <div class="floor"><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div>
+            <div class="panel"><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="info">
+        <div class="top"><span class="letter a">A</span><h2>Premium Pink</h2></div>
+        <p class="desc">LP（nexus-page.com）と完全に統一感を持たせる路線。白基調にNEXUSピンクを丁寧に効かせて、Stripe / Notion のような SaaS 高級感を目指す。</p>
+        <div class="tags"><span>白 + ピンク</span><span>Inter + Noto Sans JP</span><span>SaaS高級感</span><span>LPと統一</span></div>
+        <div class="pros">
+          <div class="pro"><b>強み:</b>LPからアプリへ違和感ゼロ</div>
+          <div class="pro"><b>印象:</b>清潔・最新・プロ</div>
+        </div>
+        <div class="cta">
+          <a class="open" href="concept-A-premium-pink.html">▶ モックを開く</a>
+          <button class="pick" onclick="alert('Concept A: Premium Pink で進めます！')">この案で進める</button>
+        </div>
+      </div>
+    </a>
+
+    <!-- B -->
+    <a class="card" href="concept-B-night-luxe.html">
+      <div class="preview p-B">
+        <div class="frame">
+          <div class="topbar"><div class="lg">N E X U S</div><div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>
+          <div class="body">
+            <div class="floor"><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div>
+            <div class="panel"><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="info">
+        <div class="top"><span class="letter b">B</span><h2>Night Luxe Gold</h2></div>
+        <p class="desc">キャバ / ガルバの夜の世界観に寄せた高級路線。ダーク背景にシャンパンゴールド、明朝体で気品。高級ホテルやバーの PMS のような佇まい。</p>
+        <div class="tags"><span>ダーク + ゴールド</span><span>明朝 + Inter</span><span>夜の世界観</span><span>業界マッチ</span></div>
+        <div class="pros">
+          <div class="pro"><b>強み:</b>業界の雰囲気にマッチ</div>
+          <div class="pro"><b>印象:</b>高級・色気・特別感</div>
+        </div>
+        <div class="cta">
+          <a class="open" href="concept-B-night-luxe.html">▶ モックを開く</a>
+          <button class="pick" onclick="alert('Concept B: Night Luxe Gold で進めます！')">この案で進める</button>
+        </div>
+      </div>
+    </a>
+
+    <!-- C -->
+    <a class="card" href="concept-C-operational.html">
+      <div class="preview p-C">
+        <div class="frame">
+          <div class="topbar"><div class="lg">NEXUS / OPS</div><div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>
+          <div class="body">
+            <div class="floor"><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div>
+            <div class="panel"><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="info">
+        <div class="top"><span class="letter c">C</span><h2>Operational Pro</h2></div>
+        <p class="desc">プロが毎日使う前提の情報密度重視。KPIタイル並列、ステータス色強調、等幅フォントで数字明確。Bloomberg / トレーディングUI の風格。</p>
+        <div class="tags"><span>ダーク + ステータス色</span><span>JetBrains Mono</span><span>情報密度高</span><span>プロ向け</span></div>
+        <div class="pros">
+          <div class="pro"><b>強み:</b>慣れると超速で動ける</div>
+          <div class="pro"><b>印象:</b>業務的・正確・速い</div>
+        </div>
+        <div class="cta">
+          <a class="open" href="concept-C-operational.html">▶ モックを開く</a>
+          <button class="pick" onclick="alert('Concept C: Operational Pro で進めます！')">この案で進める</button>
+        </div>
+      </div>
+    </a>
+
+    <!-- D -->
+    <a class="card" href="concept-D-glassmorphism.html">
+      <div class="preview p-D">
+        <div class="frame">
+          <div class="topbar"><div class="lg">NEXUS ✨</div><div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>
+          <div class="body">
+            <div class="floor"><div></div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div>
+            <div class="panel"><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div><div class="blk"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="info">
+        <div class="top"><span class="letter d">D</span><h2>Glassmorphism</h2></div>
+        <p class="desc">最新のすりガラス表現で未来感を演出。ピンク→紫のグラデ背景に半透明カード、blur(24px) の透明感で iOS17 / Apple OS 風モダンUI。</p>
+        <div class="tags"><span>グラデ + すりガラス</span><span>blur(24px)</span><span>iOS17風</span><span>SNS映え</span></div>
+        <div class="pros">
+          <div class="pro"><b>強み:</b>派手・動的・話題性</div>
+          <div class="pro"><b>印象:</b>モダン・若い・最新</div>
+        </div>
+        <div class="cta">
+          <a class="open" href="concept-D-glassmorphism.html">▶ モックを開く</a>
+          <button class="pick" onclick="alert('Concept D: Glassmorphism で進めます！')">この案で進める</button>
+        </div>
+      </div>
+    </a>
+
+  </div>
+
+  <div class="compare">
+    <h2>📊 4案 比較表</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>観点</th>
+          <th><span class="badge ba">A</span> Premium Pink</th>
+          <th><span class="badge bb">B</span> Night Luxe</th>
+          <th><span class="badge bc">C</span> Operational</th>
+          <th><span class="badge bd">D</span> Glass</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>明度</td><td>ライト</td><td>ダーク</td><td>ダーク</td><td>ライト＋彩度</td></tr>
+        <tr><td>主役色</td><td>ピンク</td><td>ゴールド</td><td>ブルー＋状態色</td><td>グラデ全体</td></tr>
+        <tr><td>主タイポ</td><td>Inter + Noto JP</td><td>明朝 + Inter</td><td>JetBrains Mono</td><td>Inter + Noto JP</td></tr>
+        <tr><td>情報密度</td><td>中</td><td>中</td><td>高（KPIタイル）</td><td>中</td></tr>
+        <tr><td>LP統一感</td><td>◎ 完全一致</td><td>△ 別世界観</td><td>△ 別世界観</td><td>○ ピンクは共通</td></tr>
+        <tr><td>夜業界マッチ</td><td>○</td><td>◎ 完全マッチ</td><td>△</td><td>○</td></tr>
+        <tr><td>毎日触る疲れ</td><td>少ない</td><td>少ない</td><td>慣れれば少ない</td><td>派手で目疲れ可能性</td></tr>
+        <tr><td>差別化</td><td>SaaS級</td><td>業界唯一無二</td><td>プロ仕様</td><td>最新トレンド</td></tr>
+        <tr><td>推奨度</td><td>★★★★★</td><td>★★★★☆</td><td>★★★☆☆</td><td>★★★☆☆</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    NEXUS POS / Design Concepts · 2026.05.27 · モックは demo データで描画されています。実プロダクトとは挙動が異なります。
+  </div>
+</div>
+</body>
+</html>

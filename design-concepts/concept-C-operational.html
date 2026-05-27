@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Concept C: Operational Pro — NEXUS POS</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1118; --bg2:#1a1d29; --card:#1f2330; --card2:#272b3a;
+  --ink:#e7ecf3; --body:#a0a8b8; --muted:#5a6273;
+  --line:#2d3242; --line2:#3a4054;
+  --accent:#5b9dff; --accent2:#7eb5ff;
+  --green:#22c55e; --green-bg:#0d2a18;
+  --amber:#f59e0b; --amber-bg:#2d1f0a;
+  --red:#ef4444; --red-bg:#2d1010;
+  --blue:#3b82f6; --blue-bg:#0d1d36;
+  --purple:#a855f7;
+  --r:6px; --r2:10px;
+  --mono:'JetBrains Mono',monospace;
+}
+html,body{height:100%;font-family:'Inter','Noto Sans JP',sans-serif;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased;font-size:13px}
+body{display:flex;flex-direction:column;min-height:100vh}
+
+/* HEADER */
+header{background:var(--bg2);border-bottom:1px solid var(--line);padding:0 16px;display:flex;align-items:center;gap:14px;height:52px;position:sticky;top:0;z-index:50}
+.logo{display:flex;align-items:baseline;gap:8px}
+.logo .brand{font-weight:800;font-size:14px;letter-spacing:.1em;color:var(--ink)}
+.logo .sub{font-size:9px;color:var(--accent);letter-spacing:.2em;font-weight:700;padding:2px 6px;border:1px solid var(--accent);border-radius:3px}
+.nav{display:flex;gap:1px;margin-left:14px;align-items:center}
+.nav a{font-size:12px;color:var(--body);padding:6px 12px;border-radius:var(--r);text-decoration:none;font-weight:500;transition:all .15s}
+.nav a:hover{background:var(--card);color:var(--ink)}
+.nav a.active{background:var(--accent);color:#fff;font-weight:600}
+.status-bar{margin-left:auto;display:flex;align-items:center;gap:14px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.status-bar .live{color:var(--green);font-weight:700}
+.status-bar .live::before{content:'●';margin-right:4px;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.user-chip{font-size:11px;color:var(--body);padding:5px 10px;border:1px solid var(--line2);border-radius:var(--r);font-family:var(--mono)}
+
+/* KPI STRIP */
+.kpi-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--line);border-bottom:1px solid var(--line)}
+.kpi-cell{background:var(--bg2);padding:14px 18px;position:relative;cursor:default;transition:background .15s}
+.kpi-cell:hover{background:var(--card)}
+.kpi-cell .lbl{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-weight:500}
+.kpi-cell .val{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--ink);margin-top:4px;letter-spacing:-.02em;line-height:1}
+.kpi-cell .delta{font-family:var(--mono);font-size:10px;margin-top:4px;font-weight:600}
+.kpi-cell .delta.up{color:var(--green)}
+.kpi-cell .delta.down{color:var(--red)}
+.kpi-cell .delta.flat{color:var(--muted)}
+.kpi-cell.hl{background:linear-gradient(135deg,var(--bg2) 0%,#1a2640 100%)}
+.kpi-cell.hl .val{color:var(--accent2)}
+.kpi-cell::after{content:'';position:absolute;top:14px;right:14px;width:5px;height:5px;border-radius:50%}
+.kpi-cell.sparkline-ok::after{background:var(--green);box-shadow:0 0 8px var(--green)}
+.kpi-cell.sparkline-warn::after{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+
+/* PAGE */
+.page{flex:1;display:grid;grid-template-columns:1fr 400px;gap:1px;background:var(--line)}
+
+.panel{background:var(--bg)}
+.panel-head{padding:10px 16px;background:var(--bg2);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;height:40px}
+.panel-head h2{font-size:11px;font-weight:700;color:var(--body);letter-spacing:.15em;text-transform:uppercase;font-family:var(--mono)}
+.panel-head .badge{font-family:var(--mono);font-size:10px;padding:2px 6px;background:var(--accent);color:#fff;border-radius:3px;font-weight:600}
+.panel-head .meta{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--muted);display:flex;align-items:center;gap:14px}
+.legend{display:flex;align-items:center;gap:4px}
+.legend .sw{width:8px;height:8px;border-radius:2px}
+.legend .sw.free{background:var(--card2)}
+.legend .sw.ok{background:var(--green)}
+.legend .sw.warn{background:var(--amber)}
+.legend .sw.over{background:var(--red)}
+.legend .sw.paid{background:var(--blue)}
+
+/* FLOOR */
+.floor{padding:14px;background:var(--bg)}
+.floor-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+
+.table{background:var(--bg2);border:1px solid var(--line2);border-radius:var(--r);padding:10px 12px;cursor:pointer;transition:all .15s;position:relative;min-height:108px;display:flex;flex-direction:column;justify-content:space-between;border-left-width:3px}
+.table:hover{background:var(--card);border-color:var(--accent)}
+.table .t-top{display:flex;justify-content:space-between;align-items:flex-start}
+.table .t-name{font-family:var(--mono);font-weight:700;font-size:15px;letter-spacing:.02em}
+.table .t-status{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-weight:600;padding:2px 5px;border-radius:3px;background:var(--card)}
+.table .t-time{font-family:var(--mono);font-size:20px;font-weight:700;letter-spacing:-.02em;margin-top:6px}
+.table .t-info{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px;letter-spacing:.02em}
+.table .t-nomi{font-size:9px;color:var(--accent2);font-weight:600;margin-top:4px;font-family:var(--mono)}
+
+.table.sel{border-color:var(--accent);background:#1a2640;box-shadow:inset 0 0 0 1px var(--accent)}
+
+.table.t-free{border-left-color:var(--line2)}
+.table.t-free .t-name{color:var(--muted)}
+.table.t-free .t-status{background:transparent}
+
+.table.t-ok{border-left-color:var(--green)}
+.table.t-ok .t-status{background:var(--green-bg);color:var(--green)}
+
+.table.t-warn{border-left-color:var(--amber)}
+.table.t-warn .t-status{background:var(--amber-bg);color:var(--amber)}
+.table.t-warn .t-time{color:var(--amber)}
+
+.table.t-over{border-left-color:var(--red);background:#2a1717}
+.table.t-over .t-status{background:var(--red-bg);color:var(--red)}
+.table.t-over .t-time{color:var(--red)}
+
+.table.t-paid{border-left-color:var(--blue);opacity:.6}
+.table.t-paid .t-status{background:var(--blue-bg);color:var(--blue)}
+
+.table.t-vip{border-left-color:var(--purple)}
+.table.t-vip .t-status{background:rgba(168,85,247,.15);color:var(--purple)}
+
+/* OPS PANEL */
+.ops-tabs{display:flex;background:var(--bg2);border-bottom:1px solid var(--line);padding:0 4px}
+.ops-tab{padding:10px 14px;font-size:11px;color:var(--muted);font-weight:600;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;letter-spacing:.05em;text-transform:uppercase;font-family:var(--mono)}
+.ops-tab:hover{color:var(--ink)}
+.ops-tab.on{color:var(--accent2);border-bottom-color:var(--accent)}
+
+.ops-body{padding:14px;display:flex;flex-direction:column;gap:12px}
+
+.selected-table-card{padding:12px 14px;background:var(--bg2);border:1px solid var(--accent);border-radius:var(--r);display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;font-family:var(--mono)}
+.selected-table-card .col .lbl{font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-weight:600}
+.selected-table-card .col .v{font-size:16px;font-weight:700;color:var(--ink);margin-top:3px}
+.selected-table-card .col .v.accent{color:var(--accent2)}
+.selected-table-card .col .v.lg{font-size:20px}
+
+.meta-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-family:var(--mono);font-size:10px}
+.meta-row .item{background:var(--card2);padding:6px 8px;border-radius:var(--r);border:1px solid var(--line)}
+.meta-row .item .lbl{color:var(--muted);font-size:9px}
+.meta-row .item .v{color:var(--ink);font-weight:600;margin-top:1px}
+
+.input-row{display:flex;gap:6px;align-items:center}
+.input-row .ic{flex-shrink:0;width:32px;height:32px;border-radius:var(--r);background:var(--card2);color:var(--accent2);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;border:1px solid var(--line2);font-family:var(--mono)}
+.input-row select{flex:1;padding:8px 10px;border:1px solid var(--line2);border-radius:var(--r);background:var(--card2);color:var(--ink);font-size:12px;font-family:inherit;outline:none}
+.input-row select:focus{border-color:var(--accent)}
+
+.btn-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px}
+.btn{cursor:pointer;font-size:11px;font-weight:600;padding:9px 8px;border-radius:var(--r);border:1px solid var(--line2);background:var(--card2);color:var(--body);font-family:inherit;display:flex;align-items:center;justify-content:center;gap:4px;transition:all .15s;letter-spacing:.02em}
+.btn:hover{background:var(--card);border-color:var(--accent);color:var(--ink)}
+.btn.accent{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700}
+.btn.accent:hover{background:var(--accent2);color:#fff}
+.btn.danger{color:var(--red);border-color:#552020}
+.btn.warn{color:var(--amber);border-color:#553a20}
+.btn.success{color:var(--green);border-color:#205540}
+.btn.full{grid-column:1/-1}
+
+.payment-bar{margin-top:6px;padding:12px;background:linear-gradient(135deg,#0a1126 0%,#15203f 100%);border-radius:var(--r);color:#fff;border:1px solid var(--accent)}
+.payment-bar .pl{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.payment-bar .pl .lbl{font-family:var(--mono);font-size:10px;color:var(--accent2);letter-spacing:.1em;font-weight:600;text-transform:uppercase}
+.payment-bar .pl .pamount{font-family:var(--mono);font-size:24px;font-weight:700;color:#fff;letter-spacing:-.02em}
+.payment-bar .pay-types{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.pay-btn{padding:8px;background:rgba(255,255,255,.05);border:1px solid var(--line2);border-radius:4px;color:#fff;cursor:pointer;font-size:11px;font-weight:600;transition:all .15s;font-family:inherit}
+.pay-btn:hover{background:rgba(91,157,255,.2);border-color:var(--accent)}
+
+/* CONCEPT BADGE */
+.concept-badge{position:fixed;bottom:16px;right:16px;z-index:100;background:var(--card);color:var(--ink);padding:10px 18px;border-radius:var(--r);box-shadow:0 12px 32px rgba(0,0,0,.5);font-size:12px;font-weight:700;display:flex;align-items:center;gap:8px;border:1px solid var(--accent);font-family:var(--mono);letter-spacing:.05em}
+.concept-badge .dot{width:8px;height:8px;background:var(--accent);border-radius:50%;box-shadow:0 0 10px var(--accent)}
+.concept-badge a{color:var(--accent2);text-decoration:none;font-weight:600;margin-left:8px}
+.concept-badge a:hover{text-decoration:underline}
+
+@media(max-width:960px){
+  .kpi-strip{grid-template-columns:repeat(3,1fr)}
+  .page{grid-template-columns:1fr}
+  .nav a:not(.active){display:none}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><span class="brand">NEXUS</span><span class="sub">OPS</span></div>
+  <nav class="nav">
+    <a href="#" class="active">FLOOR</a>
+    <a href="#">ANALYTICS</a>
+    <a href="#">CLOSE</a>
+    <a href="#">CUSTOMERS</a>
+    <a href="#">PAYROLL</a>
+    <a href="#">SHIFT</a>
+  </nav>
+  <div class="status-bar">
+    <span class="live">LIVE</span>
+    <span>22:48:07 JST</span>
+    <span>uptime 3h12m</span>
+  </div>
+  <div class="user-chip">owner @ store_01</div>
+</header>
+
+<section class="kpi-strip">
+  <div class="kpi-cell hl sparkline-ok">
+    <div class="lbl">Revenue / Today</div>
+    <div class="val">¥342,800</div>
+    <div class="delta up">↑ +12.4% vs LW</div>
+  </div>
+  <div class="kpi-cell sparkline-ok">
+    <div class="lbl">Groups</div>
+    <div class="val">28</div>
+    <div class="delta up">↑ +3 vs LW</div>
+  </div>
+  <div class="kpi-cell sparkline-ok">
+    <div class="lbl">ARPU</div>
+    <div class="val">¥12,243</div>
+    <div class="delta up">↑ +4.1%</div>
+  </div>
+  <div class="kpi-cell sparkline-warn">
+    <div class="lbl">Occupancy</div>
+    <div class="val">50%</div>
+    <div class="delta flat">5 / 10 tables</div>
+  </div>
+  <div class="kpi-cell sparkline-ok">
+    <div class="lbl">Avg Stay</div>
+    <div class="val">68m</div>
+    <div class="delta up">↑ +6m</div>
+  </div>
+  <div class="kpi-cell">
+    <div class="lbl">Casts on shift</div>
+    <div class="val">7</div>
+    <div class="delta flat">A:3 B:2 D:2</div>
+  </div>
+</section>
+
+<main class="page">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>FLOOR</h2>
+      <span class="badge">LIVE</span>
+      <div class="meta">
+        <span class="legend"><span class="sw free"></span>FREE</span>
+        <span class="legend"><span class="sw ok"></span>ACTIVE</span>
+        <span class="legend"><span class="sw warn"></span>WARN</span>
+        <span class="legend"><span class="sw over"></span>OVER</span>
+        <span class="legend"><span class="sw paid"></span>PAID</span>
+        <span>refresh: 2s</span>
+      </div>
+    </div>
+    <div class="floor">
+      <div class="floor-grid">
+        <div class="table t-free"><div class="t-top"><div class="t-name">T1</div><span class="t-status">free</span></div><div></div></div>
+        <div class="table t-ok sel"><div class="t-top"><div class="t-name">T2</div><span class="t-status">active</span></div><div><div class="t-time">42:18</div><div class="t-info">3pax · 22:15</div><div class="t-nomi">A.yukari</div></div></div>
+        <div class="table t-warn"><div class="t-top"><div class="t-name">T3</div><span class="t-status">8m left</span></div><div><div class="t-time">52:12</div><div class="t-info">2pax · 21:30</div><div class="t-nomi">A.nana</div></div></div>
+        <div class="table t-free"><div class="t-top"><div class="t-name">T4</div><span class="t-status">free</span></div><div></div></div>
+        <div class="table t-over"><div class="t-top"><div class="t-name">T5</div><span class="t-status">+14m</span></div><div><div class="t-time">74:35</div><div class="t-info">4pax · 21:00</div><div class="t-nomi">D.rin A.sakura</div></div></div>
+        <div class="table t-paid"><div class="t-top"><div class="t-name">T6</div><span class="t-status">paid</span></div><div><div class="t-time">¥18,400</div><div class="t-info">2pax · done</div></div></div>
+        <div class="table t-ok"><div class="t-top"><div class="t-name">T7</div><span class="t-status">active</span></div><div><div class="t-time">15:02</div><div class="t-info">2pax · 22:45</div><div class="t-nomi">B.honoka</div></div></div>
+        <div class="table t-free"><div class="t-top"><div class="t-name">T8</div><span class="t-status">free</span></div><div></div></div>
+        <div class="table t-vip t-ok"><div class="t-top"><div class="t-name">VIP-1</div><span class="t-status">vip · active</span></div><div><div class="t-time">28:43</div><div class="t-info">4pax · 21:45</div><div class="t-nomi">A.mio D.yukari</div></div></div>
+        <div class="table t-vip t-free"><div class="t-top"><div class="t-name">VIP-2</div><span class="t-status">vip · free</span></div><div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="ops-tabs">
+      <div class="ops-tab on">CHECK-IN / BILL</div>
+      <div class="ops-tab">DRINK</div>
+      <div class="ops-tab">BOTTLE</div>
+      <div class="ops-tab">FOOD</div>
+    </div>
+    <div class="ops-body">
+      <div class="selected-table-card">
+        <div class="col"><div class="lbl">TABLE</div><div class="v lg">T2</div></div>
+        <div class="col"><div class="lbl">ELAPSED</div><div class="v">42:18</div></div>
+        <div class="col"><div class="lbl">TOTAL</div><div class="v accent">¥14,200</div></div>
+      </div>
+
+      <div class="meta-row">
+        <div class="item"><div class="lbl">PAX</div><div class="v">3</div></div>
+        <div class="item"><div class="lbl">IN</div><div class="v">22:15</div></div>
+        <div class="item"><div class="lbl">CAST</div><div class="v">yukari</div></div>
+        <div class="item"><div class="lbl">SET</div><div class="v">60min</div></div>
+      </div>
+
+      <div class="input-row">
+        <div class="ic">PAX</div>
+        <select><option>3 person</option><option>1 person</option><option>2 person</option><option>4 person</option></select>
+        <button class="btn accent" style="padding:8px 14px">CHECK IN</button>
+      </div>
+
+      <div class="btn-grid">
+        <button class="btn success">+ 30min</button>
+        <button class="btn warn">- 30min</button>
+        <button class="btn">auto-ext OFF</button>
+        <button class="btn">edit pax</button>
+        <button class="btn">move seat</button>
+        <button class="btn">edit time</button>
+        <button class="btn" style="color:#e879f9;border-color:#552055">douhan</button>
+        <button class="btn" style="color:#86efac;border-color:#205540">discount</button>
+        <button class="btn" style="color:#fcd34d;border-color:#554020">nomination</button>
+        <button class="btn accent full">EXECUTE NOMINATION (本指名+場内指名)</button>
+      </div>
+
+      <div class="payment-bar">
+        <div class="pl">
+          <span class="lbl">SETTLEMENT</span>
+          <span class="pamount">¥14,200</span>
+        </div>
+        <div class="pay-types">
+          <button class="pay-btn">💵 CASH</button>
+          <button class="pay-btn">💳 CARD</button>
+          <button class="pay-btn">📱 QR</button>
+        </div>
+        <button class="btn accent full" style="margin-top:8px">✓ CONFIRM PAYMENT</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="concept-badge">
+  <span class="dot"></span>
+  CONCEPT_C / OPS
+  <a href="index.html">← back</a>
+</div>
+
+</body>
+</html>
