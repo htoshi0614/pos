@@ -71,7 +71,7 @@ def _record_attempt(ip: str):
     _login_attempts[ip].append(now)
 
 # ---------- バージョン情報・アップデート通知 ----------
-POSSTART_VERSION = "1.0.4"
+POSSTART_VERSION = "1.0.5"
 
 @app.get("/api/version")
 def api_version():
@@ -2522,6 +2522,107 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
   .qtyCtrl button{width:40px;height:40px}
   header h1{font-size:14px}
 }
+
+/* ===== Premium Pink: Concept A 専用構造 ===== */
+:root{
+  --r:10px; --r2:16px; --r3:999px;
+  --shadow-lg:0 20px 50px -20px rgba(10,10,15,.18);
+}
+/* ヘッダー Brand ロゴ */
+.brand-wrap{display:flex;align-items:baseline;gap:10px}
+.brand-wrap .brand{font-family:'Inter',sans-serif;font-weight:800;font-size:20px;letter-spacing:.03em;background:linear-gradient(135deg,var(--ink),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.brand-wrap .sub{font-size:11px;color:var(--accent);letter-spacing:.2em;font-weight:600;border-left:1px solid var(--line);padding-left:10px}
+.user-chip{display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--line);border-radius:var(--r3);font-size:12px;color:var(--body);background:#fff;font-weight:600}
+.user-chip .dot{width:8px;height:8px;background:var(--green);border-radius:50%;box-shadow:0 0 0 3px rgba(34,197,94,.15)}
+.user-chip select,.user-chip input{border:0 !important;background:transparent !important;padding:0 4px !important;font-size:12px !important;font-weight:600 !important;width:auto !important;box-shadow:none !important}
+.user-chip select:focus,.user-chip input:focus{box-shadow:none !important}
+.set-toggle{cursor:pointer;background:none;border:1px solid var(--line);border-radius:var(--r3);padding:6px 12px;font-size:12px;color:var(--body);font-weight:600;transition:all .2s;font-family:inherit}
+.set-toggle:hover{border-color:var(--accent);color:var(--accent)}
+.set-toggle input[type=checkbox]{accent-color:var(--accent);margin-right:4px;vertical-align:middle}
+
+/* ヒーローセクション */
+.hero{padding:24px 24px 4px;display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:16px}
+.hero-main{background:linear-gradient(135deg,#fff 0%,var(--accent-soft) 100%);border:1px solid var(--line);border-radius:var(--r2);padding:22px 28px;position:relative;overflow:hidden;box-shadow:var(--shadow-sm)}
+.hero-main::after{content:'';position:absolute;top:-30px;right:-30px;width:200px;height:200px;background:radial-gradient(circle,var(--accent) 0%,transparent 70%);opacity:.08;pointer-events:none}
+.hero-main .label{font-size:11px;color:var(--accent);font-weight:700;letter-spacing:.15em;margin-bottom:6px;position:relative}
+.hero-main .store{font-size:20px;font-weight:800;margin-bottom:14px;letter-spacing:-.01em;position:relative}
+.hero-main .revenue{display:flex;align-items:baseline;gap:6px;position:relative}
+.hero-main .revenue .yen{font-size:18px;color:var(--muted);font-weight:500}
+.hero-main .revenue .amt{font-family:'Inter',sans-serif;font-size:38px;font-weight:800;letter-spacing:-.02em;background:linear-gradient(135deg,var(--ink),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero-main .delta{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--green);font-weight:700;margin-top:8px;padding:3px 10px;background:rgba(34,197,94,.1);border-radius:var(--r3);position:relative}
+.kpi-tile{background:var(--card);border:1px solid var(--line);border-radius:var(--r2);padding:18px 20px;display:flex;flex-direction:column;justify-content:space-between;transition:all .25s;box-shadow:var(--shadow-sm)}
+.kpi-tile:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border-color:var(--accent)}
+.kpi-tile .kpi-label{font-size:10px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;font-weight:700}
+.kpi-tile .kpi-val{font-family:'Inter',sans-serif;font-size:24px;font-weight:800;letter-spacing:-.01em;color:var(--ink);margin-top:6px}
+.kpi-tile .kpi-sub{font-size:11px;color:var(--muted);margin-top:4px}
+.kpi-tile .kpi-sub.up{color:var(--green);font-weight:700}
+
+/* パネル */
+.panel-head{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;background:#fff}
+.panel-head h2{margin:0;padding:0;border:0;font-size:14px;font-weight:700}
+.panel-head .meta{margin-left:auto;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.legend{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);font-weight:500}
+.legend .sw{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.legend .sw.free{background:#e5e7eb;border:1px solid #cbd5e1}
+.legend .sw.ok{background:var(--green)}
+.legend .sw.warn{background:var(--amber)}
+.legend .sw.over{background:var(--red)}
+.legend .sw.paid{background:var(--blue)}
+
+/* 選択中テーブルカード */
+.selected-table-card{padding:14px 16px;background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--r);display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.selected-table-card .l .lbl{font-size:10px;color:var(--accent);font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.selected-table-card .l .tn{font-family:'Inter',sans-serif;font-size:22px;font-weight:800;color:var(--ink);margin-top:2px}
+.selected-table-card .l .ti{font-size:11px;color:var(--muted);margin-top:2px}
+.selected-table-card .r{text-align:right}
+.selected-table-card .r .tot{font-family:'Inter',sans-serif;font-size:22px;font-weight:800;color:var(--accent);letter-spacing:-.01em}
+.selected-table-card .r .tl{font-size:10px;color:var(--muted);font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+
+/* 入店行 */
+.input-row{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+.input-row .ic{flex-shrink:0;width:36px;height:36px;border-radius:var(--r);background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700}
+.input-row select{flex:0 0 auto;min-width:80px}
+.input-row .grow{flex:1}
+
+/* ダーク決済バー */
+.payment-bar{margin-top:10px;padding:14px 16px;background:#0a0a0f;border-radius:var(--r);color:#fff}
+.payment-bar .pl{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.payment-bar .pl .lbl{font-size:11px;color:#bbb;letter-spacing:.1em;font-weight:700;text-transform:uppercase}
+.payment-bar .pl .pamount{font-family:'Inter',sans-serif;font-size:24px;font-weight:800;color:#fff;letter-spacing:-.01em}
+.payment-bar input#payAmount{flex:1;background:rgba(255,255,255,.08) !important;border:1px solid rgba(255,255,255,.15) !important;color:#fff !important;font-size:18px;padding:10px;text-align:right;font-weight:700;border-radius:8px;width:100%;margin-bottom:8px}
+.payment-bar input#payAmount:focus{border-color:var(--accent) !important;box-shadow:0 0 0 3px rgba(214,69,131,.3) !important}
+.pay-types{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.pay-btn{padding:10px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#fff;cursor:pointer;font-size:12px;font-weight:700;transition:all .2s;font-family:inherit}
+.pay-btn:hover{background:rgba(255,255,255,.15);border-color:var(--accent);transform:translateY(-1px)}
+.pay-btn.cash{background:rgba(34,197,94,.18);border-color:rgba(34,197,94,.4)}
+.pay-btn.cash:hover{background:rgba(34,197,94,.28)}
+.pay-btn.card{background:rgba(59,130,246,.18);border-color:rgba(59,130,246,.4)}
+.pay-btn.card:hover{background:rgba(59,130,246,.28)}
+.pay-btn.qr{background:rgba(168,85,247,.18);border-color:rgba(168,85,247,.4)}
+.pay-btn.qr:hover{background:rgba(168,85,247,.28)}
+.pay-confirm{margin-top:10px;width:100%;padding:13px;background:var(--accent);color:#fff;border:0;border-radius:8px;font-weight:800;font-size:15px;cursor:pointer;transition:all .2s;font-family:inherit;letter-spacing:.02em}
+.pay-confirm:hover{background:var(--accent-dark);transform:translateY(-1px);box-shadow:0 8px 20px rgba(214,69,131,.3)}
+
+/* 設定ポップオーバー */
+#settingsPopover{display:none;position:absolute;top:64px;right:18px;background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:16px;box-shadow:var(--shadow-lg);z-index:60;min-width:240px}
+#settingsPopover.open{display:block}
+#settingsPopover label{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;color:var(--body);font-weight:600;margin-bottom:10px}
+#settingsPopover label:last-child{margin-bottom:0}
+#settingsPopover input,#settingsPopover select{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 10px;font-size:13px;width:120px}
+
+/* ヒーロー: スマホ */
+@media(max-width:1100px){
+  .hero{grid-template-columns:1.4fr 1fr 1fr;gap:12px;padding:14px 14px 4px}
+  .hero-main .revenue .amt{font-size:32px}
+  .hero .kpi-tile:nth-child(4){display:none}
+}
+@media(max-width:900px){
+  .hero{grid-template-columns:1fr 1fr;gap:10px;padding:10px}
+  .hero-main{grid-column:1/-1}
+  .hero-main .revenue .amt{font-size:36px}
+  .panel-head{padding:12px 14px;flex-wrap:wrap}
+  .panel-head .meta{font-size:11px;gap:8px}
+}
 </style>
 </head>
 <body>
@@ -2537,40 +2638,37 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
 </div></div>
 
 <header>
-  <h1>Girls Bar POS</h1>
-  <label>Store <input id="storeId" type="number" value="1" style="width:70px"></label>
-  <label>Role
-    <select id="role">
-      <option value="owner" selected>owner</option>
-      <option value="manager">manager</option>
-      <option value="cashier">cashier</option>
-      <option value="staff">staff</option>
-    </select>
-  </label>
-  <label style="display:flex;align-items:center;gap:6px;">
-    <input id="editToggle" type="checkbox"> 配置編集
-  </label>
-  <div id="adminNav" style="display:none;gap:6px;margin-left:8px;flex-wrap:wrap">
-    <a href="/ui/management" target="_blank" style="color:#f59e0b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #f59e0b44;text-decoration:none;font-weight:700">分析</a>
-    <a href="/ui/closing" target="_blank" style="color:#22c55e;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #22c55e44;text-decoration:none;font-weight:700">締め</a>
-    <a href="/ui/customers" target="_blank" style="color:#a855f7;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #a855f744;text-decoration:none">顧客台帳</a>
-    <a href="/ui/bottles" target="_blank" style="color:#ec4899;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #ec489944;text-decoration:none">ボトルキープ</a>
-    <a href="/ui/tabs" target="_blank" style="color:#ef4444;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #ef444444;text-decoration:none">伝票</a>
-    <a href="/ui/pricing" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">料金</a>
-    <a href="/ui/salary" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">給与</a>
-    <a href="/ui/backup" target="_blank" id="backupNavLink" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">💾 バックアップ<span id="backupDot" style="margin-left:3px;font-size:9px;vertical-align:middle;color:#64748b" title="バックアップ状態確認中...">●</span></a>
-    <a href="/ui/audit" target="_blank" style="color:#64748b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #64748b44;text-decoration:none">監査</a>
-    <a href="/ui/weather" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">天気</a>
-    <a href="/ui/mail" target="_blank" style="color:#f59e0b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #f59e0b44;text-decoration:none">メール</a>
-    <a href="/ui/attendance" target="_blank" class="admin-link" style="color:#22c55e;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #22c55e44;text-decoration:none;font-weight:700">出退勤</a>
-    <a href="/ui/subscription" target="_blank" style="color:#0ea5e9;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #1f2937;text-decoration:none">サブスク</a>
-    <a href="/ui/import" target="_blank" class="admin-link" style="color:#f59e0b;font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid #f59e0b44;text-decoration:none;font-weight:700">📦 データ移行</a>
+  <div class="brand-wrap"><span class="brand">NEXUS</span><span class="sub">POS</span></div>
+  <div id="adminNav" style="display:none;gap:4px;align-items:center;flex-wrap:wrap">
+    <a href="/ui/management" target="_blank">📊 分析</a>
+    <a href="/ui/closing" target="_blank">📋 締め</a>
+    <a href="/ui/customers" target="_blank">👥 顧客</a>
+    <a href="/ui/salary" target="_blank">💵 給与</a>
+    <a href="/ui/attendance" target="_blank">🕐 出退勤</a>
+    <a href="/ui/bottles" target="_blank">🍾 ボトル</a>
+    <a href="/ui/tabs" target="_blank">📝 伝票</a>
+    <a href="/ui/pricing" target="_blank">💰 料金</a>
+    <a href="/ui/backup" target="_blank" id="backupNavLink">💾 バックアップ<span id="backupDot" style="margin-left:3px;font-size:9px;vertical-align:middle;color:#64748b">●</span></a>
+    <a href="/ui/audit" target="_blank">🔍 監査</a>
+    <a href="/ui/weather" target="_blank">🌤 天気</a>
+    <a href="/ui/mail" target="_blank">📧 メール</a>
+    <a href="/ui/subscription" target="_blank">💳 サブスク</a>
+    <a href="/ui/import" target="_blank">📦 移行</a>
   </div>
-  <div class="muted" style="margin-left:auto;white-space:nowrap;display:flex;align-items:center;gap:8px">
-    <span id="selTable" class="mono" style="font-size:16px;font-weight:700;color:var(--accent)">-</span>
-    <span style="margin:0 2px">/</span>
-    SS:<span id="selSess" class="mono">-</span>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px;white-space:nowrap">
+    <span class="user-chip" style="font-family:'Inter',monospace;font-size:11px"><span id="selTable" class="mono" style="color:var(--accent);font-weight:800">-</span><span class="muted" style="opacity:.5">/</span>SS:<span id="selSess" class="mono">-</span></span>
+    <span class="user-chip"><span class="dot"></span><select id="role" style="appearance:none">
+      <option value="owner" selected>オーナー</option>
+      <option value="manager">マネージャ</option>
+      <option value="cashier">レジ</option>
+      <option value="staff">スタッフ</option>
+    </select></span>
+    <button class="set-toggle" onclick="toggleSettings(event)">⚙ 設定</button>
     <button class="hamburger" id="menuBtn" onclick="toggleNavDrawer()">☰</button>
+  </div>
+  <div id="settingsPopover">
+    <label>店舗ID <input id="storeId" type="number" value="1"></label>
+    <label>配置編集モード <input id="editToggle" type="checkbox"></label>
   </div>
 </header>
 
@@ -2601,15 +2699,54 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
   <button onclick="switchIpadTab('ops',this)">操作</button>
 </div>
 
+<!-- ヒーロー: 本日売上 + KPI -->
+<section class="hero" id="heroSection">
+  <div class="hero-main">
+    <div class="label" id="heroDate">本日</div>
+    <div class="store" id="heroStore">店舗 1</div>
+    <div class="revenue"><span class="yen">¥</span><span class="amt" id="heroRevenue">-</span></div>
+    <span class="delta" id="heroDelta" style="display:none">- 先週比</span>
+  </div>
+  <div class="kpi-tile">
+    <div class="kpi-label">客数（組）</div>
+    <div>
+      <div class="kpi-val"><span id="kpiGroups">-</span><span style="font-size:13px;color:var(--muted);font-weight:500"> 組</span></div>
+      <div class="kpi-sub" id="kpiGroupsSub">本日累計</div>
+    </div>
+  </div>
+  <div class="kpi-tile">
+    <div class="kpi-label">確定売上</div>
+    <div>
+      <div class="kpi-val" id="kpiConfirmed">-</div>
+      <div class="kpi-sub up" id="kpiConfirmedSub">会計済</div>
+    </div>
+  </div>
+  <div class="kpi-tile">
+    <div class="kpi-label">稼働テーブル</div>
+    <div>
+      <div class="kpi-val"><span id="kpiOccupied">-</span><span style="font-size:13px;color:var(--muted);font-weight:500"> / <span id="kpiTotalTables">-</span></span></div>
+      <div class="kpi-sub" id="kpiOccupancy">稼働率 -</div>
+    </div>
+  </div>
+</section>
+
 <div class="page">
   <section class="panel ipad-active" id="floorPanel">
-    <h2>フロア
-      <span id="tableEditBtns" style="display:none;margin-left:12px">
+    <div class="panel-head">
+      <h2>🪑 フロア</h2>
+      <span id="tableEditBtns" style="display:none;gap:6px;margin-left:6px">
         <button class="btn" onclick="addTable()" style="font-size:12px;padding:5px 12px;background:#f0fdf4;border-color:#86efac;color:#15803d;font-weight:700">+ テーブル追加</button>
         <button class="btn" onclick="removeTable()" style="font-size:12px;padding:5px 12px;background:#fef2f2;border-color:#fecaca;color:#b91c1c;font-weight:700">- 選択テーブル削除</button>
       </span>
-      <span id="floorClock" class="mono muted" style="float:right;font-size:14px"></span>
-    </h2>
+      <div class="meta">
+        <span class="legend"><span class="sw free"></span>空席</span>
+        <span class="legend"><span class="sw ok"></span>営業中</span>
+        <span class="legend"><span class="sw warn"></span>注意</span>
+        <span class="legend"><span class="sw over"></span>超過</span>
+        <span class="legend"><span class="sw paid"></span>会計済</span>
+        <span id="floorClock" class="mono" style="font-family:'Inter',sans-serif;font-weight:700;color:var(--ink)">--:--:--</span>
+      </div>
+    </div>
     <div class="p"><div class="floor-wrap" id="floor"></div></div>
   </section>
 
@@ -2644,54 +2781,66 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
         </div>
         <div class="tabpanes">
           <div id="pane-entry" class="active">
-            <!-- 入店エリア -->
-            <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
-              <label class="muted" style="font-size:12px;white-space:nowrap">人数</label>
-              <select id="guestCount" style="width:70px;font-size:15px;padding:6px">
-                <option value="1">1名</option><option value="2">2名</option><option value="3">3名</option>
+            <!-- 選択中テーブルカード -->
+            <div class="selected-table-card" id="selectedTableCard">
+              <div class="l">
+                <div class="lbl">選択中</div>
+                <div class="tn" id="stcName">-</div>
+                <div class="ti" id="stcInfo">テーブルを選択してください</div>
+              </div>
+              <div class="r">
+                <div class="tl">会計</div>
+                <div class="tot" id="stcTotal">¥0</div>
+              </div>
+            </div>
+
+            <!-- 入店行: 人数 + 入店ボタン -->
+            <div class="input-row">
+              <div class="ic">👥</div>
+              <select id="guestCount">
+                <option value="1">1名</option><option value="2">2名</option><option value="3" selected>3名</option>
                 <option value="4">4名</option><option value="5">5名</option><option value="6">6名</option>
               </select>
-              <button class="bigbtn solid" id="btnCheckin" style="flex:1;text-align:center;font-weight:700">入店</button>
+              <button class="bigbtn solid grow" id="btnCheckin" style="text-align:center;font-weight:800;padding:11px 16px">入店</button>
             </div>
+
             <!-- 延長ボタンエリア（JS で動的に描画）-->
-            <div id="extendBtnsArea" style="margin-bottom:8px"></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
+            <div id="extendBtnsArea" style="margin-bottom:10px"></div>
+
+            <!-- 操作ボタングリッド -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
               <button class="bigbtn" id="btnAutoExtend" style="text-align:center;font-size:12px">自動延長 OFF</button>
               <button class="bigbtn" id="btnChangeGuest" style="text-align:center;font-size:12px;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8">人数変更</button>
               <button class="bigbtn" id="btnMoveTable" style="text-align:center;font-size:12px;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8">席変更</button>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
               <button class="bigbtn" id="btnChangeStart" style="text-align:center;font-size:12px;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8">時間変更</button>
               <button class="bigbtn" id="btnDouhan" style="text-align:center;font-size:12px;background:#fdf0f7;border-color:#f9a8d4;color:#b03468;font-weight:700">同伴</button>
               <button class="bigbtn" id="btnDiscount" style="text-align:center;font-size:12px;background:#f0fdf4;border-color:#86efac;color:#15803d;font-weight:700">割引</button>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
-              <button class="bigbtn" id="btnNomHon" style="text-align:center;font-size:12px;background:#fdf0f7;border-color:#d64583;color:#b03468;font-weight:700">本指名+</button>
-              <button class="bigbtn" id="btnNomJyonai" style="text-align:center;font-size:12px;background:#fdf0f7;border-color:#d64583;color:#b03468;font-weight:700">場内指名+</button>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+              <button class="bigbtn" id="btnNomHon" style="text-align:center;font-size:13px;background:#fdf0f7;border-color:#d64583;color:#b03468;font-weight:700">本指名+</button>
+              <button class="bigbtn" id="btnNomJyonai" style="text-align:center;font-size:13px;background:#fdf0f7;border-color:#d64583;color:#b03468;font-weight:700">場内指名+</button>
             </div>
-            <div style="display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:8px">
-              <button class="bigbtn" id="btnCancelCheckin" style="text-align:center;font-size:12px;color:#b91c1c;border-color:#fecaca;background:#fef2f2">入店取消</button>
+            <div style="margin-bottom:6px">
+              <button class="bigbtn" id="btnCancelCheckin" style="width:100%;text-align:center;font-size:12px;color:#b91c1c;border-color:#fecaca;background:#fef2f2">入店取消</button>
             </div>
-            <hr>
-            <!-- 支払いエリア -->
-            <div style="margin-bottom:8px">
-              <div class="muted" style="font-size:11px;margin-bottom:4px">お支払い</div>
-              <div style="display:flex;gap:6px;margin-bottom:6px">
-                <input id="payAmount" style="flex:1;font-size:18px;padding:10px;text-align:right;font-weight:700" placeholder="金額" type="number">
+
+            <!-- ダーク決済バー -->
+            <div class="payment-bar">
+              <div class="pl"><span class="lbl">お支払い</span><span class="pamount" id="payAmountDisplay">¥0</span></div>
+              <input id="payAmount" placeholder="金額を入力" type="number">
+              <div class="pay-types">
+                <button class="pay-btn cash" id="btnPayCash">💵 現金</button>
+                <button class="pay-btn card" id="btnPayCard">💳 カード</button>
+                <button class="pay-btn qr" id="btnPayQR">📱 QR</button>
               </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-                <button class="bigbtn" id="btnPayCash" style="text-align:center;font-size:14px;background:#f0fdf4;border-color:#86efac;color:#15803d;font-weight:700">💵 現金</button>
-                <button class="bigbtn" id="btnPayCard" style="text-align:center;font-size:14px;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;font-weight:700">💳 カード</button>
-                <button class="bigbtn" id="btnPayQR" style="text-align:center;font-size:14px;background:#faf5ff;border-color:#d8b4fe;color:#7e22ce;font-weight:700">📱 QR</button>
-              </div>
+              <button class="pay-confirm" id="btnCheckout">✓ 会計確定</button>
+              <button id="btnReceipt" style="margin-top:6px;width:100%;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:#fff;padding:9px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">領収書</button>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-              <button class="bigbtn solid" id="btnCheckout" style="text-align:center;font-weight:700;font-size:16px">会計確定</button>
-              <button class="bigbtn" id="btnReceipt" style="text-align:center;font-size:14px">領収書</button>
-            </div>
-            <hr>
+
             <!-- 伝票（内訳） -->
-            <div id="billBox" class="muted mono" style="font-size:12px;line-height:1.6"></div>
+            <div id="billBox" class="muted mono" style="font-size:12px;line-height:1.6;margin-top:12px;padding:10px 12px;background:var(--card2);border-radius:8px;border:1px dashed var(--line)"></div>
           </div>
 
           <!-- 数量管理：各カテゴリ 0スタート + / - -->
@@ -2730,14 +2879,10 @@ hr{border:0;border-top:1px solid var(--line);margin:10px 0}
       </div>
     </div>
 
-    <div class="card">
-      <h3>今日の売上</h3>
-      <div class="cbody">
-        <div class="kv"><div class="muted">確定</div><div class="mono" id="salesConfirmed" style="color:#22c55e;font-size:18px;font-weight:700">-</div></div>
-        <div class="kv"><div class="muted">見込み(含open)</div><div class="mono" id="salesToday">-</div></div>
-        <div class="kv"><div class="muted">組数</div><div class="mono" id="salesSessions">-</div></div>
-        <div style="font-size:10px;color:var(--muted);margin-top:4px" id="wsStatus">WS: 接続中...</div>
-      </div>
+    <!-- WS状態（最下部に控えめ表示・ヒーローKPIにデータは集約済み） -->
+    <div style="text-align:center;font-size:10px;color:var(--muted);padding:4px">
+      <span id="wsStatus">WS: 接続中...</span>
+      <span style="display:none"><span id="salesConfirmed">-</span><span id="salesToday">-</span><span id="salesSessions">-</span></span>
     </div>
   </aside>
 </div>
@@ -3083,6 +3228,9 @@ async function loadFloor(){
     const selEl=$('table-'+selectedTableId);
     if(selEl) selEl.classList.add('sel');
   }
+  // ヒーローKPI（稼働テーブル）と選択カードを更新
+  try{ updateSelectedTableCard(); }catch{}
+  try{ if(typeof refreshSales==='function') refreshSales(); }catch{}
 }
 
 /* 指名タグを "D:ゆかり　A:なな" 形式の文字列に変換 */
@@ -3574,17 +3722,83 @@ function renderBill(b){
   // 支払額にデフォルト値をセット
   const pa=$('payAmount');
   if(pa && !pa.value && b.due>0) pa.placeholder=`¥${Math.round(b.due).toLocaleString()}`;
+  // 選択カードの会計表示
+  const stcTotal=document.getElementById('stcTotal');
+  if(stcTotal){ stcTotal.textContent='¥'+(b.due>0?b.due:b.total||0).toLocaleString(); }
+  try{ updatePayDisplay(); }catch{}
 }
 
-/* 今日の売上（注文/取消/会計で即時反映） */
+/* 今日の売上（注文/取消/会計で即時反映） + ヒーロー/KPI 更新 */
 async function refreshSales(){
   try{
     const d=await api(`/closing?store_id=${store()}`);
-    $('salesConfirmed').textContent=(d.confirmed_sales||0).toLocaleString()+' 円';
-    $('salesToday').textContent=(d.total_sales||0).toLocaleString()+' 円';
-    $('salesSessions').textContent=`${d.closed_count||0}組確定 / ${d.open_count||0}組open`;
+    const conf=(d.confirmed_sales||0);
+    const total=(d.total_sales||0);
+    const closed=d.closed_count||0;
+    const open=d.open_count||0;
+    // 既存（非表示）
+    $('salesConfirmed').textContent=conf.toLocaleString()+' 円';
+    $('salesToday').textContent=total.toLocaleString()+' 円';
+    $('salesSessions').textContent=`${closed}組確定 / ${open}組open`;
+    // ヒーロー
+    const heroRev=$('heroRevenue'); if(heroRev) heroRev.textContent=total.toLocaleString();
+    const kpiGroups=$('kpiGroups'); if(kpiGroups) kpiGroups.textContent=String(closed+open);
+    const kpiGroupsSub=$('kpiGroupsSub'); if(kpiGroupsSub) kpiGroupsSub.textContent=`確定 ${closed} / 営業中 ${open}`;
+    const kpiConfirmed=$('kpiConfirmed'); if(kpiConfirmed) kpiConfirmed.textContent='¥'+conf.toLocaleString();
+    const tot=floorModel && floorModel.tables ? floorModel.tables.length : 0;
+    const occ=floorModel && floorModel.sessions ? floorModel.sessions.filter(s=>s.status!=='paid'&&s.status!=='cancelled').length : 0;
+    const kpiOcc=$('kpiOccupied'); if(kpiOcc) kpiOcc.textContent=String(occ);
+    const kpiTot=$('kpiTotalTables'); if(kpiTot) kpiTot.textContent=String(tot);
+    const kpiOccRate=$('kpiOccupancy'); if(kpiOccRate) kpiOccRate.textContent=tot>0?`稼働率 ${Math.round(occ/tot*100)}%`:'稼働率 -';
+    // 日付ラベル
+    const heroDate=$('heroDate'); if(heroDate){ const d2=new Date(); heroDate.textContent=`本日 · ${d2.getFullYear()}.${String(d2.getMonth()+1).padStart(2,'0')}.${String(d2.getDate()).padStart(2,'0')} (${'日月火水木金土'[d2.getDay()]})`; }
+    // 店舗名
+    const heroStore=$('heroStore'); if(heroStore) heroStore.textContent=`店舗 ${store()}`;
   }catch{}
 }
+
+/* 設定ポップオーバー */
+function toggleSettings(ev){
+  if(ev){ ev.stopPropagation(); }
+  const p=document.getElementById('settingsPopover'); if(!p) return;
+  p.classList.toggle('open');
+  if(p.classList.contains('open')){
+    setTimeout(()=>{
+      document.addEventListener('click', function _h(e){
+        if(!p.contains(e.target) && !e.target.closest('.set-toggle')){ p.classList.remove('open'); document.removeEventListener('click',_h); }
+      });
+    },10);
+  }
+}
+
+/* 選択中テーブルカード & 決済バー金額表示の更新 */
+function updateSelectedTableCard(){
+  const stcName=document.getElementById('stcName');
+  const stcInfo=document.getElementById('stcInfo');
+  const stcTotal=document.getElementById('stcTotal');
+  if(!stcName) return;
+  if(!selectedTableId){ stcName.textContent='-'; stcInfo.textContent='テーブルを選択してください'; stcTotal.textContent='¥0'; return; }
+  const tbl=(floorModel.tables||[]).find(t=>t.id===selectedTableId);
+  const sess=(floorModel.sessions||[]).find(s=>s.table_id===selectedTableId && s.status!=='paid'&&s.status!=='cancelled');
+  stcName.textContent=tbl?tbl.name:('T'+selectedTableId);
+  if(sess){
+    const elapsed=Math.floor((Date.now()-new Date(sess.started_at).getTime())/60000);
+    stcInfo.textContent=`${sess.guest_count}名 · ${new Date(sess.started_at).toTimeString().slice(0,5)}開始 · 経過 ${elapsed}分`;
+  }else{
+    stcInfo.textContent='空席';
+  }
+}
+function updatePayDisplay(){
+  const inp=document.getElementById('payAmount');
+  const disp=document.getElementById('payAmountDisplay');
+  if(!inp||!disp) return;
+  const v=parseInt(inp.value||'0',10);
+  disp.textContent='¥'+(isNaN(v)?0:v).toLocaleString();
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  const inp=document.getElementById('payAmount');
+  if(inp){ inp.addEventListener('input',updatePayDisplay); }
+});
 
 /* WebSocket: 他端末からの変更通知で自動リフレッシュ */
 let _ws=null;

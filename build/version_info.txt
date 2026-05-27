@@ -1,8 +1,8 @@
 # UTF-8
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 4, 0),
-    prodvers=(1, 0, 4, 0),
+    filevers=(1, 0, 5, 0),
+    prodvers=(1, 0, 5, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -18,12 +18,12 @@ VSVersionInfo(
           [
             StringStruct(u'CompanyName', u'POSStart'),
             StringStruct(u'FileDescription', u'POSStart - キャバクラ・ガールズバー専用POSシステム'),
-            StringStruct(u'FileVersion', u'1.0.4.0'),
+            StringStruct(u'FileVersion', u'1.0.5.0'),
             StringStruct(u'InternalName', u'POSStart'),
             StringStruct(u'LegalCopyright', u'Copyright (c) 2026 POSStart'),
             StringStruct(u'OriginalFilename', u'POSStart.exe'),
             StringStruct(u'ProductName', u'POSStart'),
-            StringStruct(u'ProductVersion', u'1.0.4.0')
+            StringStruct(u'ProductVersion', u'1.0.5.0')
           ]
         )
       ]
