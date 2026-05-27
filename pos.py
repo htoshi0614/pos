@@ -71,7 +71,7 @@ def _record_attempt(ip: str):
     _login_attempts[ip].append(now)
 
 # ---------- バージョン情報・アップデート通知 ----------
-POSSTART_VERSION = "1.0.5"
+POSSTART_VERSION = "1.0.6"
 
 @app.get("/api/version")
 def api_version():
@@ -395,36 +395,48 @@ body{background:var(--bg);color:var(--text);display:flex;align-items:center;just
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px;margin-bottom:16px}
 .card h2{font-size:16px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
 .card h2 .icon{font-size:20px}
-.plan-box{background:#0a1423;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
-.plan-price{font-size:28px;font-weight:800;color:var(--accent)}
-.plan-price span{font-size:14px;font-weight:400;color:var(--muted)}
-.plan-detail{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7}
-.plan-detail li{list-style:none;padding-left:16px;position:relative}
-.plan-detail li::before{content:"✓";position:absolute;left:0;color:var(--green);font-weight:700}
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap');
+html,body{font-family:'Inter','Noto Sans JP',-apple-system,system-ui,sans-serif !important;-webkit-font-smoothing:antialiased}
+.logo-area h1{background:linear-gradient(135deg,var(--ink) 0%,var(--accent) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-family:'Inter','Noto Sans JP',sans-serif}
+.logo-area h1 span{color:var(--accent);-webkit-text-fill-color:var(--accent)}
+.card{box-shadow:0 4px 12px rgba(10,10,15,.06),0 12px 32px rgba(10,10,15,.06)}
+.card h2{color:var(--ink);font-weight:800;letter-spacing:.01em}
+.plan-box{background:linear-gradient(135deg,#fff 0%,var(--accent-soft) 100%);border:1px solid var(--accent);border-radius:14px;padding:22px 24px;margin-bottom:18px;position:relative;overflow:hidden;box-shadow:0 4px 16px rgba(214,69,131,.08)}
+.plan-box::after{content:'';position:absolute;top:-30px;right:-30px;width:180px;height:180px;background:radial-gradient(circle,var(--accent) 0%,transparent 70%);opacity:.1;pointer-events:none}
+.plan-box .badge-pop{position:absolute;top:14px;right:16px;background:var(--accent);color:#fff;font-size:10px;font-weight:700;padding:4px 10px;border-radius:999px;letter-spacing:.1em}
+.plan-price{font-family:'Inter',sans-serif;font-size:42px;font-weight:800;letter-spacing:-.02em;background:linear-gradient(135deg,var(--ink),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent;line-height:1.1;position:relative}
+.plan-price span{font-size:14px;font-weight:500;color:var(--muted);-webkit-text-fill-color:var(--muted);background:none;letter-spacing:0}
+.plan-detail{font-size:13px;color:var(--body);margin-top:14px;line-height:1.9;font-weight:500;position:relative}
+.plan-detail li{list-style:none;padding-left:22px;position:relative}
+.plan-detail li::before{content:"✓";position:absolute;left:0;color:var(--green);font-weight:800;font-size:14px;width:18px;height:18px;background:rgba(34,197,94,.15);border-radius:50%;text-align:center;line-height:18px;font-size:11px}
 .methods{display:flex;flex-direction:column;gap:10px}
-.method-btn{display:flex;align-items:center;gap:12px;width:100%;padding:14px 16px;border-radius:12px;border:1px solid var(--line);background:#111827;color:var(--text);font-size:15px;cursor:pointer;transition:all .15s}
-.method-btn:hover{border-color:var(--accent);background:#0c1a2e}
-.method-btn .m-icon{font-size:22px;width:32px;text-align:center}
-.method-btn .m-label{flex:1;text-align:left}
-.method-btn .m-sub{font-size:11px;color:var(--muted)}
-.method-btn .arrow{color:var(--muted);font-size:18px}
+.method-btn{display:flex;align-items:center;gap:14px;width:100%;padding:16px 20px;border-radius:14px;border:1.5px solid var(--line);background:#fff;color:var(--ink);font-size:15px;font-weight:600;cursor:pointer;transition:all .2s;font-family:inherit;text-align:left}
+.method-btn:hover{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);transform:translateY(-2px);box-shadow:0 8px 20px rgba(214,69,131,.12)}
+.method-btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent-dark));border-color:var(--accent);color:#fff;box-shadow:0 6px 18px rgba(214,69,131,.3)}
+.method-btn.primary:hover{background:linear-gradient(135deg,var(--accent-dark),var(--accent));color:#fff;box-shadow:0 10px 28px rgba(214,69,131,.45);transform:translateY(-3px)}
+.method-btn.primary .m-sub{color:rgba(255,255,255,.85)}
+.method-btn.primary .arrow{color:#fff}
+.method-btn .m-icon{font-size:24px;width:36px;text-align:center;flex-shrink:0}
+.method-btn .m-label{flex:1;text-align:left;font-weight:700}
+.method-btn .m-sub{font-size:12px;color:var(--muted);font-weight:500;margin-top:2px}
+.method-btn .arrow{color:inherit;opacity:.6;font-size:20px;font-weight:700}
 .divider{display:flex;align-items:center;gap:12px;margin:8px 0}
 .divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line)}
-.divider span{font-size:12px;color:var(--muted);white-space:nowrap}
+.divider span{font-size:11px;color:var(--muted);white-space:nowrap;font-weight:600;letter-spacing:.05em}
 .vendor-section{text-align:center}
-.vendor-toggle{background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:8px;text-decoration:underline}
-.vendor-toggle:hover{color:var(--text)}
+.vendor-toggle{background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:8px;text-decoration:underline;font-family:inherit;font-weight:500}
+.vendor-toggle:hover{color:var(--accent)}
 .vendor-form{display:none;margin-top:12px}
 .vendor-form.show{display:block}
 .input-group{position:relative;margin-bottom:12px}
-.input-group input{width:100%;padding:12px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line);background:#0a1423;color:var(--text);outline:none}
-.input-group input:focus{border-color:var(--accent)}
-.vendor-btn{width:100%;padding:12px;border-radius:10px;border:none;background:var(--purple);color:#fff;font-size:15px;font-weight:700;cursor:pointer;transition:opacity .15s}
-.vendor-btn:hover{opacity:.9}
+.input-group input{width:100%;padding:12px 14px;font-size:15px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--ink);outline:none;font-family:inherit}
+.input-group input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.vendor-btn{width:100%;padding:12px;border-radius:10px;border:none;background:var(--ink);color:#fff;font-size:15px;font-weight:700;cursor:pointer;transition:all .2s;font-family:inherit}
+.vendor-btn:hover{background:var(--accent)}
 .vendor-btn:disabled{opacity:.5;cursor:not-allowed}
-.error-msg{color:#ef4444;font-size:13px;margin-top:8px;display:none}
+.error-msg{color:var(--red);font-size:13px;margin-top:8px;display:none;font-weight:600}
 .footer{text-align:center;margin-top:20px}
-.footer p{font-size:11px;color:#475569;line-height:1.6}
+.footer p{font-size:11px;color:var(--muted);line-height:1.6}
 @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
 .shake{animation:shake .3s ease}
 
@@ -470,22 +482,24 @@ input:focus,select:focus{border-color:#d64583 !important;box-shadow:0 0 0 3px #f
   </div>
 
   <div class="card">
-    <h2><span class="icon">💳</span>ご利用プラン</h2>
+    <h2><span class="icon">💎</span>ご利用プラン</h2>
     <div class="plan-box">
+      <span class="badge-pop">月額固定</span>
+      <div style="font-size:11px;color:var(--accent);font-weight:700;letter-spacing:.15em;margin-bottom:6px">STANDARD PLAN</div>
       <div class="plan-price">¥30,000<span> /月（税込）</span></div>
       <ul class="plan-detail">
-        <li>全機能利用可能</li>
+        <li>全機能利用可能（追加課金なし）</li>
         <li>複数端末対応（リアルタイム同期）</li>
         <li>顧客管理・売上分析・Zレポート</li>
         <li>自動バックアップ・監査ログ</li>
       </ul>
     </div>
     <div class="methods">
-      <button class="method-btn" onclick="payStripe()">
+      <button class="method-btn primary" onclick="payStripe()">
         <div class="m-icon">💳</div>
         <div class="m-label">
           クレジットカードで申し込む
-          <div class="m-sub">VISA / Mastercard / AMEX 対応</div>
+          <div class="m-sub">VISA / Mastercard / AMEX 対応・即日利用開始</div>
         </div>
         <div class="arrow">→</div>
       </button>
@@ -493,7 +507,7 @@ input:focus,select:focus{border-color:#d64583 !important;box-shadow:0 0 0 3px #f
         <div class="m-icon">🏦</div>
         <div class="m-label">
           口座振込で申し込む
-          <div class="m-sub">請求書を発行します</div>
+          <div class="m-sub">請求書を発行します（1営業日以内に有効化）</div>
         </div>
         <div class="arrow">→</div>
       </button>
