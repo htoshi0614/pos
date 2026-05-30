@@ -425,6 +425,32 @@ nav a:hover,.nav a:hover{color:#d64583}
 [style*="color:#94a3b8"],[style*="color:#9ca3af"]{color:#8a8a95 !important}
 [style*="border:1px solid #1f2937"],[style*="border:1px solid #334155"],[style*="border:1px solid #263244"]{border-color:#eaeaef !important}
 
+
+/* === Premium Pink v2 (page-specific) === */
+.preset-btn{background:#ffffff !important;border:2px solid #eaeaef !important;color:#0a0a0f !important}
+.preset-btn:hover,.preset-btn.active{border-color:#d64583 !important;background:#fdf0f7 !important;color:#b03468 !important}
+.preset-btn .icon{color:#d64583 !important}
+.btn.green,.btn.success{background:#f0fdf4 !important;border-color:#86efac !important;color:#15803d !important}
+.btn.danger,.btn.err{background:#fef2f2 !important;border-color:#fca5a5 !important;color:#b91c1c !important}
+.btn.solid,.btn.primary{color:#ffffff !important}
+.step-num{color:#ffffff !important;background:#d64583 !important}
+.badge.sent,.badge.success,.badge.ok{background:#f0fdf4 !important;color:#15803d !important;border:1px solid #86efac !important}
+.badge.failed,.badge.error,.badge.ng{background:#fef2f2 !important;color:#b91c1c !important;border:1px solid #fca5a5 !important}
+.status-bar{border-radius:10px}
+.status-bar.ok{background:#f0fdf4 !important;border:1px solid #86efac !important;color:#15803d !important}
+.status-bar.ng,.status-bar.err,.status-bar.warning{background:#fef2f2 !important;border:1px solid #fca5a5 !important;color:#b91c1c !important}
+.recipient-item{background:#ffffff !important;border-color:#eaeaef !important;color:#0a0a0f}
+.recipient-item .name{color:#8a8a95 !important}
+.note,.help,.hint{color:#4a4a55 !important}
+input,select,textarea{background:#ffffff !important;color:#0a0a0f !important;border:1px solid #eaeaef !important}
+input:focus,select:focus,textarea:focus{border-color:#d64583 !important;box-shadow:0 0 0 3px #fdf0f7 !important}
+.tab,.tab-btn{color:#8a8a95 !important}
+.tab.active,.tab-btn.active{color:#d64583 !important;background:#fdf0f7 !important;border-color:#d64583 !important}
+.tab-body{background:#ffffff !important;border-color:#eaeaef !important}
+/* 残ダーク背景の inline / クラスを一掃 */
+[style*="#0a1423"],[style*="#0a1624"],[style*="#0a1220"],[style*="#0c1a2e"],[style*="#0c2a3d"],[style*="#1a2438"],[style*="#1c1c2e"],[style*="#0c1d2e"]{background:#ffffff !important;color:#0a0a0f !important;border-color:#eaeaef !important}
+[style*="#0ea5e9"]{color:#d64583 !important}
+
 </style></head><body>
 <div class="container">
 <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
