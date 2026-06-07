@@ -594,7 +594,42 @@ td.rank-3{color:#b08d57 !important}
 [style*="#0a1423"],[style*="#0a1624"],[style*="#0a1220"],[style*="#0c1a2e"],[style*="#0c2a3d"],[style*="#1a2438"],[style*="#1c1c2e"],[style*="#0c1d2e"],[style*="#0b1220"],[style*="#0f172a"],[style*="#111827"]{background:#ffffff !important;color:#0a0a0f !important;border-color:#eaeaef !important}
 [style*="#0ea5e9"]{color:#d64583 !important}
 
-</style></head><body>
+/* === 分析v3: モダン化（Chart.js + サマリーヒーロー） === */
+body{background:#f7f7fa !important}
+.container{max-width:1180px;gap:18px}
+.row:first-of-type{background:#fff;border:1px solid #eaeaef;border-radius:14px;padding:14px 18px;box-shadow:0 1px 3px rgba(10,10,15,.04)}
+.row:first-of-type label{flex-direction:row;align-items:center;gap:6px;font-weight:600;color:#4a4a55}
+/* サマリーヒーロー */
+.summary-hero{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.sh-card{position:relative;background:#fff;border:1px solid #eaeaef;border-radius:16px;padding:20px 22px;overflow:hidden;box-shadow:0 1px 3px rgba(10,10,15,.04),0 6px 20px rgba(10,10,15,.04);transition:transform .2s,box-shadow .2s}
+.sh-card:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(10,10,15,.08)}
+.sh-card .ic{position:absolute;top:16px;right:16px;width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:17px}
+.sh-card .lbl{font-size:11px;font-weight:700;letter-spacing:.06em;color:#8a8a95;text-transform:uppercase}
+.sh-card .val{font-family:'Inter',sans-serif;font-size:30px;font-weight:800;letter-spacing:-.02em;margin-top:6px;line-height:1.1;color:#0a0a0f}
+.sh-card .dl{font-size:11px;color:#8a8a95;margin-top:4px}
+.sh-card.accent{background:linear-gradient(135deg,#fff,#fdf0f7);border-color:#d64583}
+.sh-card.accent .val{background:linear-gradient(135deg,#0a0a0f,#d64583);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sh-card.accent .ic{background:#d64583;color:#fff;font-weight:800}
+.sh-card .ic.g{background:#f0fdf4;color:#16a34a}
+.sh-card .ic.b{background:#eff6ff;color:#2563eb}
+.sh-card .ic.gd{background:#faf3e3;color:#b8924a}
+/* chart card */
+.chart-card{background:#fff;border:1px solid #eaeaef;border-radius:16px;padding:20px 22px;box-shadow:0 1px 3px rgba(10,10,15,.04),0 2px 8px rgba(10,10,15,.04);margin-bottom:18px}
+.chart-card h2{border:none !important;padding:0 !important;margin:0 0 2px !important;font-size:15px;font-weight:800}
+.chart-card .csub{font-size:12px;color:#8a8a95;margin-bottom:16px}
+.chart-box{position:relative;height:300px}
+.chart-box.sm{height:250px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.grid2 .chart-card{margin-bottom:0}
+@media(max-width:860px){.summary-hero{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}}
+/* タブをピル型 */
+.section-tabs{border:none !important;background:#fff;padding:6px;border-radius:14px;gap:4px;display:inline-flex;box-shadow:0 1px 3px rgba(10,10,15,.04);flex-wrap:wrap;width:fit-content;max-width:100%}
+.section-tab{border:none !important;border-radius:10px;padding:9px 18px}
+.section-tab.active{box-shadow:0 4px 12px rgba(214,69,131,.25)}
+
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head><body>
 <header>
   <h1>マネジメント</h1>
   <div class="nav" style="display:flex;gap:6px;margin-left:auto">
@@ -647,63 +682,71 @@ td.rank-3{color:#b08d57 !important}
       </div>
     </div>
 
-    <!-- 給率分析バー -->
-    <div class="card">
-      <h2>給率 比較（キャスト総支給 ÷ 関与売上）</h2>
-      <div id="payRateBars"></div>
-    </div>
-
-    <!-- 売上貢献バー -->
-    <div class="card">
-      <h2>売上貢献額ランキング</h2>
-      <div id="revenueBars"></div>
+    <div class="grid2">
+      <!-- 売上貢献 -->
+      <div class="chart-card">
+        <h2>売上貢献額ランキング</h2>
+        <div class="csub">キャスト別の関与売上（上位ほど貢献大）</div>
+        <div class="chart-box"><canvas id="revenueChart"></canvas></div>
+      </div>
+      <!-- 給率 -->
+      <div class="chart-card">
+        <h2>給率 比較</h2>
+        <div class="csub">総支給 ÷ 関与売上（緑=健全 / 黄=注意 / 赤=高め）</div>
+        <div class="chart-box"><canvas id="payRateChart"></canvas></div>
+      </div>
     </div>
   </div>
 
   <!-- ===== 店舗売上 ===== -->
   <div class="section-pane" id="sec-store">
 
-    <div class="kpi-grid" id="storeKpis"></div>
+    <!-- サマリーヒーロー -->
+    <div class="summary-hero" id="storeHero"></div>
 
     <!-- 日別売上 -->
-    <div class="card">
+    <div class="chart-card">
       <h2>日別売上推移</h2>
-      <div id="dailyBars" style="display:flex;align-items:flex-end;gap:3px;height:180px;padding:10px 0;border-bottom:1px solid var(--line)"></div>
-      <div id="dailyLabels" style="display:flex;gap:3px;font-size:9px;color:var(--muted);margin-top:4px"></div>
+      <div class="csub">今月の日ごとの売上の動き</div>
+      <div class="chart-box"><canvas id="dailyChart"></canvas></div>
     </div>
 
-    <!-- 時間帯別売上 -->
-    <div class="card">
-      <h2>時間帯別売上</h2>
-      <div id="hourlyBars" style="display:flex;align-items:flex-end;gap:4px;height:160px;padding:10px 0;border-bottom:1px solid var(--line)"></div>
-      <div id="hourlyLabels" style="display:flex;gap:4px;font-size:10px;color:var(--muted);margin-top:4px"></div>
-    </div>
-
-    <!-- 支払方法 -->
-    <div class="card">
-      <h2>支払方法内訳</h2>
-      <div class="pie-row" id="paymentPie"></div>
+    <div class="grid2">
+      <!-- 時間帯別売上 -->
+      <div class="chart-card">
+        <h2>時間帯別売上</h2>
+        <div class="csub">どの時間に売れているか</div>
+        <div class="chart-box sm"><canvas id="hourlyChart"></canvas></div>
+      </div>
+      <!-- 支払方法 -->
+      <div class="chart-card">
+        <h2>支払方法内訳</h2>
+        <div class="csub">現金 / カード / QR の構成比</div>
+        <div class="chart-box sm"><canvas id="paymentChart"></canvas></div>
+      </div>
     </div>
   </div>
 
   <!-- ===== ヒートマップ ===== -->
   <div class="section-pane" id="sec-heatmap">
-    <div class="card">
+    <div class="chart-card">
       <h2>時間帯 × 曜日 来客ヒートマップ</h2>
+      <div class="csub">色が濃いほど来客が多い時間帯（混雑のピークが一目でわかります）</div>
       <div style="overflow-x:auto">
-        <table id="heatmapTable" style="text-align:center">
+        <table id="heatmapTable" style="text-align:center;border-collapse:separate;border-spacing:0">
           <thead id="heatmapHead"></thead>
           <tbody id="heatmapBody"></tbody>
         </table>
       </div>
-      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;font-size:11px;color:var(--muted)">
-        <span>少</span>
-        <div style="width:20px;height:12px;background:#0a1624;border:1px solid var(--line)"></div>
-        <div style="width:20px;height:12px;background:#14532d"></div>
-        <div style="width:20px;height:12px;background:#22c55e"></div>
-        <div style="width:20px;height:12px;background:#f59e0b"></div>
-        <div style="width:20px;height:12px;background:#ef4444"></div>
-        <span>多</span>
+      <div style="margin-top:14px;display:flex;gap:6px;align-items:center;font-size:11px;color:#8a8a95">
+        <span>少ない</span>
+        <div style="width:22px;height:14px;background:#f7f7fa;border:1px solid #eaeaef;border-radius:3px"></div>
+        <div style="width:22px;height:14px;background:#fbe0ec;border-radius:3px"></div>
+        <div style="width:22px;height:14px;background:#f3b6d0;border-radius:3px"></div>
+        <div style="width:22px;height:14px;background:#e87aa8;border-radius:3px"></div>
+        <div style="width:22px;height:14px;background:#d64583;border-radius:3px"></div>
+        <div style="width:22px;height:14px;background:#b03468;border-radius:3px"></div>
+        <span>多い</span>
       </div>
     </div>
   </div>
@@ -711,11 +754,19 @@ td.rank-3{color:#b08d57 !important}
   <!-- ===== リピート率 ===== -->
   <div class="section-pane" id="sec-repeat">
     <div class="kpi-grid" id="repeatKpis"></div>
-    <div class="card">
-      <h2>新規 vs リピーター</h2>
-      <div id="repeatBars" style="display:flex;height:40px;border-radius:8px;overflow:hidden;margin-bottom:12px"></div>
-      <div id="repeatDetail" style="font-size:13px"></div>
+    <div class="grid2">
+      <div class="chart-card">
+        <h2>新規 vs リピーター</h2>
+        <div class="csub">来店客の構成比</div>
+        <div class="chart-box sm"><canvas id="repeatChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h2>客単価の比較</h2>
+        <div class="csub">新規とリピーターの平均利用額</div>
+        <div class="chart-box sm"><canvas id="repeatSpendChart"></canvas></div>
+      </div>
     </div>
+    <div id="repeatDetail" style="font-size:13px;color:#8a8a95"></div>
   </div>
 
   <!-- ===== 目標設定 ===== -->
@@ -739,6 +790,24 @@ $('year').value=now.getFullYear();
 $('month').value=now.getMonth()+1;
 const yen=v=>`¥${Math.round(v||0).toLocaleString()}`;
 const pct=v=>`${(v||0).toFixed(1)}%`;
+
+/* ===== Chart.js 共通設定 ===== */
+const C={pink:'#d64583',pinkSoft:'rgba(214,69,131,.12)',gold:'#c9a96e',green:'#16a34a',blue:'#2563eb',purple:'#a855f7',ink:'#0a0a0f',muted:'#8a8a95',line:'#eaeaef'};
+if(window.Chart){
+  Chart.defaults.font.family="'Inter','Noto Sans JP',sans-serif";
+  Chart.defaults.font.size=12;
+  Chart.defaults.color=C.muted;
+  Chart.defaults.plugins.legend.labels.usePointStyle=true;
+  Chart.defaults.plugins.legend.labels.boxWidth=8;
+}
+const _charts={};
+function drawChart(id,cfg){
+  const el=$(id); if(!el||!window.Chart) return;
+  if(_charts[id]) _charts[id].destroy();
+  _charts[id]=new Chart(el,cfg);
+}
+const yenTick=v=>'¥'+(v>=10000?(v/10000).toFixed(v%10000?1:0)+'万':v.toLocaleString());
+const tipYen={callbacks:{label:c=>' '+yen(c.parsed.y!=null?c.parsed.y:c.parsed.x)}};
 
 // タブ
 document.querySelectorAll('.section-tab').forEach(tab=>{
@@ -801,30 +870,27 @@ async function loadCast(s,y,m){
       tb.appendChild(tr);
     });
 
-    // 給率バー
-    const maxPR=Math.max(...casts.map(c=>c.pay_rate),1);
-    $('payRateBars').innerHTML=casts.map(c=>{
-      const w=Math.max(2,c.pay_rate/maxPR*100);
-      const color=c.pay_rate>50?'var(--red)':c.pay_rate>35?'var(--gold)':'var(--green)';
-      return `<div class="bar-wrap" style="margin:6px 0">
-        <span style="width:80px;font-size:12px">${c.cast_name}</span>
-        <div class="bar" style="width:${w}%;background:${color}"></div>
-        <span style="font-size:12px;font-family:monospace;color:${color}">${pct(c.pay_rate)}</span>
-      </div>`;
-    }).join('');
+    // 売上貢献（横棒・上位10）
+    const top=casts.slice(0,10);
+    drawChart('revenueChart',{
+      type:'bar',
+      data:{labels:top.map(c=>c.cast_name),datasets:[{data:top.map(c=>Math.round(c.cast_revenue)),
+        backgroundColor:top.map((_,i)=>i===0?C.gold:i===1?'#b9bcc4':i===2?'#cd7f32':C.pinkSoft),
+        borderColor:top.map((_,i)=>i<3?'transparent':C.pink),borderWidth:top.map((_,i)=>i<3?0:1.5),borderRadius:6}]},
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},tooltip:tipYen},
+        scales:{x:{ticks:{callback:yenTick},grid:{color:C.line}},y:{grid:{display:false}}}}
+    });
 
-    // 売上貢献バー
-    const maxRev=Math.max(...casts.map(c=>c.cast_revenue),1);
-    $('revenueBars').innerHTML=casts.map((c,i)=>{
-      const w=Math.max(2,c.cast_revenue/maxRev*100);
-      const colors=['var(--gold)','#94a3b8','#cd7f32','var(--accent)','var(--purple)'];
-      const color=colors[i]||'var(--accent)';
-      return `<div class="bar-wrap" style="margin:6px 0">
-        <span style="width:80px;font-size:12px">${c.cast_name}</span>
-        <div class="bar" style="width:${w}%;background:${color}"></div>
-        <span style="font-size:12px;font-family:monospace">${yen(c.cast_revenue)}</span>
-      </div>`;
-    }).join('');
+    // 給率（横棒・色分け）
+    drawChart('payRateChart',{
+      type:'bar',
+      data:{labels:casts.map(c=>c.cast_name),datasets:[{data:casts.map(c=>+c.pay_rate.toFixed(1)),
+        backgroundColor:casts.map(c=>c.pay_rate>50?'rgba(239,68,68,.85)':c.pay_rate>35?'rgba(201,169,110,.85)':'rgba(22,163,74,.85)'),borderRadius:6}]},
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' 給率 '+c.parsed.x+'%'}}},
+        scales:{x:{ticks:{callback:v=>v+'%'},grid:{color:C.line}},y:{grid:{display:false}}}}
+    });
 
   }catch(e){console.error(e);alert('キャスト成績取得エラー: '+e.message)}
 }
@@ -833,52 +899,49 @@ async function loadStore(s,y,m){
   try{
     const d=await api(`/management/store-analytics?store_id=${s}&year=${y}&month=${m}`);
 
-    // KPIs
-    $('storeKpis').innerHTML=`
-      <div class="kpi"><div class="label">月間売上</div><div class="value" style="font-size:20px;color:var(--green)">${yen(d.total_revenue)}</div></div>
-      <div class="kpi"><div class="label">来店組数</div><div class="value">${d.session_count}</div><div class="sub">組</div></div>
-      <div class="kpi"><div class="label">来店人数</div><div class="value">${d.total_guests}</div><div class="sub">名</div></div>
-      <div class="kpi"><div class="label">客単価</div><div class="value" style="font-size:18px">${yen(d.avg_per_guest)}</div></div>
-      <div class="kpi"><div class="label">組単価</div><div class="value" style="font-size:18px">${yen(d.avg_per_group)}</div></div>
+    // サマリーヒーロー
+    $('storeHero').innerHTML=`
+      <div class="sh-card accent"><div class="ic">¥</div><div class="lbl">月間売上</div><div class="val">${yen(d.total_revenue)}</div><div class="dl">今月の総売上</div></div>
+      <div class="sh-card"><div class="ic b">👥</div><div class="lbl">来店組数</div><div class="val">${d.session_count}<span style="font-size:14px;color:#8a8a95;font-weight:600"> 組</span></div><div class="dl">のべ ${d.total_guests} 名</div></div>
+      <div class="sh-card"><div class="ic g">📈</div><div class="lbl">客単価</div><div class="val">${yen(d.avg_per_guest)}</div><div class="dl">1名あたり平均</div></div>
+      <div class="sh-card"><div class="ic gd">🍾</div><div class="lbl">組単価</div><div class="val">${yen(d.avg_per_group)}</div><div class="dl">1組あたり平均</div></div>
     `;
 
-    // 日別バーチャート
+    // 日別売上（エリアライン）
     const daily=d.daily||[];
-    const maxD=Math.max(...daily.map(x=>x.revenue),1);
-    $('dailyBars').innerHTML=daily.map(x=>{
-      const h=Math.max(2,x.revenue/maxD*160);
-      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end">
-        <div style="font-size:9px;font-family:monospace;margin-bottom:2px">${x.revenue>0?Math.round(x.revenue/1000)+'k':''}</div>
-        <div style="width:100%;height:${h}px;background:var(--accent);border-radius:4px 4px 0 0;min-width:8px"></div>
-      </div>`;
-    }).join('');
-    $('dailyLabels').innerHTML=daily.map(x=>`<div style="flex:1;text-align:center">${x.date.slice(8)}</div>`).join('');
+    drawChart('dailyChart',{
+      type:'line',
+      data:{labels:daily.map(x=>x.date.slice(8)+'日'),datasets:[{label:'売上',data:daily.map(x=>Math.round(x.revenue)),
+        borderColor:C.pink,backgroundColor:C.pinkSoft,fill:true,tension:.35,borderWidth:2.5,
+        pointRadius:0,pointHoverRadius:5,pointHoverBackgroundColor:C.pink,pointHoverBorderColor:'#fff',pointHoverBorderWidth:2}]},
+      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+        plugins:{legend:{display:false},tooltip:tipYen},
+        scales:{x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:12}},y:{beginAtZero:true,ticks:{callback:yenTick},grid:{color:C.line}}}}
+    });
 
-    // 時間帯別バーチャート
+    // 時間帯別（縦棒）
     const hourly=d.hourly||[];
-    const maxH=Math.max(...hourly.map(x=>x.revenue),1);
-    $('hourlyBars').innerHTML=hourly.map(x=>{
-      const h=Math.max(2,x.revenue/maxH*140);
-      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end">
-        <div style="font-size:9px;font-family:monospace;margin-bottom:2px">${x.revenue>0?Math.round(x.revenue/1000)+'k':''}</div>
-        <div style="width:100%;height:${h}px;background:var(--purple);border-radius:4px 4px 0 0;min-width:12px"></div>
-      </div>`;
-    }).join('');
-    $('hourlyLabels').innerHTML=hourly.map(x=>`<div style="flex:1;text-align:center">${x.hour}時</div>`).join('');
+    drawChart('hourlyChart',{
+      type:'bar',
+      data:{labels:hourly.map(x=>x.hour+'時'),datasets:[{data:hourly.map(x=>Math.round(x.revenue)),
+        backgroundColor:C.purple,borderRadius:6,maxBarThickness:34}]},
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},tooltip:tipYen},
+        scales:{x:{grid:{display:false}},y:{beginAtZero:true,ticks:{callback:yenTick},grid:{color:C.line}}}}
+    });
 
-    // 支払方法
+    // 支払方法（ドーナツ）
     const pm=d.payment_methods||{};
-    const pmTotal=Object.values(pm).reduce((a,v)=>a+v,0)||1;
-    const pmColors={cash:'var(--green)',card:'var(--accent)',qr:'var(--purple)'};
     const pmLabels={cash:'現金',card:'カード',qr:'QR'};
-    $('paymentPie').innerHTML=Object.entries(pm).map(([k,v])=>{
-      const p=(v/pmTotal*100).toFixed(1);
-      return `<div class="pie-item">
-        <div><span class="dot" style="background:${pmColors[k]||'#999'}"></span>${pmLabels[k]||k}</div>
-        <div style="font-size:20px;font-weight:900;font-family:monospace">${p}%</div>
-        <div style="font-size:11px;color:var(--muted)">${yen(v)}</div>
-      </div>`;
-    }).join('');
+    const pmColors={cash:C.green,card:C.pink,qr:C.purple};
+    const pmKeys=Object.keys(pm);
+    drawChart('paymentChart',{
+      type:'doughnut',
+      data:{labels:pmKeys.map(k=>pmLabels[k]||k),datasets:[{data:pmKeys.map(k=>Math.round(pm[k])),
+        backgroundColor:pmKeys.map(k=>pmColors[k]||'#bbb'),borderColor:'#fff',borderWidth:3,hoverOffset:6}]},
+      options:{responsive:true,maintainAspectRatio:false,cutout:'62%',
+        plugins:{legend:{position:'bottom'},tooltip:{callbacks:{label:c=>{const t=c.dataset.data.reduce((a,b)=>a+b,0)||1;return ' '+c.label+': '+yen(c.parsed)+' ('+(c.parsed/t*100).toFixed(1)+'%)';}}}}}
+    });
 
   }catch(e){console.error(e);alert('店舗分析エラー: '+e.message)}
 }
@@ -900,12 +963,14 @@ async function loadHeatmap(s,y,m){
       const cells=hours.map(h=>{
         const v=row.hours[h]||0;
         const intensity=v/maxVal;
-        let bg='#0a1624';
-        if(intensity>0.8) bg='#ef4444';
-        else if(intensity>0.6) bg='#f59e0b';
-        else if(intensity>0.3) bg='#22c55e';
-        else if(intensity>0) bg='#14532d';
-        return `<td style="background:${bg};color:${intensity>0.5?'#fff':'var(--muted)'};font-size:12px;min-width:36px;padding:8px 4px">${v||''}</td>`;
+        // 薄ピンク→濃ピンクのグラデで来客密度を表現
+        let bg='#f7f7fa';
+        if(intensity>0.8) bg='#b03468';
+        else if(intensity>0.6) bg='#d64583';
+        else if(intensity>0.4) bg='#e87aa8';
+        else if(intensity>0.2) bg='#f3b6d0';
+        else if(intensity>0) bg='#fbe0ec';
+        return `<td style="background:${bg};color:${intensity>0.55?'#fff':'#0a0a0f'};font-size:12px;min-width:36px;padding:8px 4px;border:2px solid #fff;border-radius:6px;font-weight:600">${v||''}</td>`;
       }).join('');
       return `<tr><td style="font-weight:700;font-size:13px;color:${i>=5?'var(--accent)':'var(--text)'}">${dows[i]}</td>${cells}</tr>`;
     }).join('');
@@ -924,14 +989,24 @@ async function loadRepeat(s,y,m){
       <div class="kpi"><div class="label">新規 客単価</div><div class="value" style="font-size:18px">${yen(d.avg_new_spent)}</div></div>
       <div class="kpi"><div class="label">リピーター 客単価</div><div class="value" style="font-size:18px">${yen(d.avg_repeat_spent)}</div></div>
     `;
-    const total=d.new_count+d.repeat_count||1;
-    const newPct=d.new_count/total*100;
-    const repPct=d.repeat_count/total*100;
-    $('repeatBars').innerHTML=`
-      <div style="width:${newPct}%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">${d.new_count>0?'新規 '+d.new_count:''}</div>
-      <div style="width:${repPct}%;background:var(--green);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">${d.repeat_count>0?'リピ '+d.repeat_count:''}</div>
-    `;
-    $('repeatDetail').innerHTML=d.note?`<div style="color:var(--muted)">${d.note}</div>`:'';
+    // 新規 vs リピーター（ドーナツ）
+    drawChart('repeatChart',{
+      type:'doughnut',
+      data:{labels:['新規','リピーター'],datasets:[{data:[d.new_count,d.repeat_count],
+        backgroundColor:[C.pink,C.green],borderColor:'#fff',borderWidth:3,hoverOffset:6}]},
+      options:{responsive:true,maintainAspectRatio:false,cutout:'62%',
+        plugins:{legend:{position:'bottom'},tooltip:{callbacks:{label:c=>{const t=(d.new_count+d.repeat_count)||1;return ' '+c.label+': '+c.parsed+'名 ('+(c.parsed/t*100).toFixed(1)+'%)';}}}}}
+    });
+    // 客単価比較（縦棒）
+    drawChart('repeatSpendChart',{
+      type:'bar',
+      data:{labels:['新規','リピーター'],datasets:[{data:[Math.round(d.avg_new_spent),Math.round(d.avg_repeat_spent)],
+        backgroundColor:[C.pink,C.green],borderRadius:8,maxBarThickness:70}]},
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},tooltip:tipYen},
+        scales:{x:{grid:{display:false}},y:{beginAtZero:true,ticks:{callback:yenTick},grid:{color:C.line}}}}
+    });
+    $('repeatDetail').innerHTML=d.note?`${d.note}`:'';
   }catch(e){console.error(e)}
 }
 
@@ -952,7 +1027,7 @@ async function loadGoals(s,y,m){
       const g=goalMap[c.cast_id]||{target_nominations:0,target_sales:0,target_attendance:0};
       const nomProg=g.target_nominations?Math.min(100,c.total_noms/g.target_nominations*100):0;
       const saleProg=g.target_sales?Math.min(100,c.cast_revenue/g.target_sales*100):0;
-      const progBar=(pct)=>`<div style="width:100px;height:8px;background:#1e293b;border-radius:4px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${pct>=100?'var(--green)':pct>=70?'var(--gold)':'var(--accent)'};border-radius:4px"></div></div>`;
+      const progBar=(pct)=>`<div style="width:100px;height:8px;background:#f3f3f6;border-radius:4px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${pct>=100?'var(--green)':pct>=70?'var(--gold)':'var(--accent)'};border-radius:4px"></div></div>`;
       tb.innerHTML+=`<tr>
         <td><b>${c.cast_name}</b></td>
         <td><input type="number" value="${g.target_nominations}" style="width:60px" id="gn-${c.cast_id}"></td>
