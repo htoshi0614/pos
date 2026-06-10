@@ -71,7 +71,7 @@ def _record_attempt(ip: str):
     _login_attempts[ip].append(now)
 
 # ---------- バージョン情報・アップデート通知 ----------
-POSSTART_VERSION = "1.0.9"
+POSSTART_VERSION = "1.0.10"
 
 @app.get("/api/version")
 def api_version():

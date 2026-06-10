@@ -633,6 +633,7 @@ body{background:#f7f7fa !important}
 <header>
   <h1>マネジメント</h1>
   <div class="nav" style="display:flex;gap:6px;margin-left:auto">
+    <a href="#" onclick="openReport();return false" style="background:#d64583;color:#fff !important;border:1px solid #d64583;font-weight:700">📄 月次レポート</a>
     <a href="/ui">フロア</a>
     <a href="/ui/pricing">料金設定</a>
     <a href="/ui/salary">給与管理</a>
@@ -1053,7 +1054,221 @@ async function saveGoal(castId){
   loadGoals(s,y,m);
 }
 
+/* 月次レポートを別タブで開く */
+function openReport(){
+  const s=$('storeId').value,y=$('year').value,m=$('month').value;
+  window.open(`/ui/management/report?store_id=${s}&year=${y}&month=${m}`,'_blank');
+}
+
 loadAll();
+</script>
+</body></html>
+""")
+
+
+# ======================= 月次コンサルレポート（印刷→PDF保存用） =======================
+@router.get("/ui/management/report", response_class=HTMLResponse)
+def ui_monthly_report():
+    return HTMLResponse(r"""
+<!doctype html><html lang="ja"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>月次レポート - NEXUS</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Inter:wght@500;600;700;800&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--ink:#0a0a0f;--body:#4a4a55;--muted:#8a8a95;--line:#eaeaef;--accent:#d64583;--accent-soft:#fdf0f7;--gold:#c9a96e;--green:#16a34a;--amber:#d97706;--red:#dc2626}
+body{font-family:'Inter','Noto Sans JP',sans-serif;color:var(--ink);background:#e8e8ee;line-height:1.8;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.page{width:210mm;min-height:297mm;background:#fff;margin:8mm auto;padding:14mm 16mm 18mm;position:relative;box-shadow:0 4px 24px rgba(0,0,0,.12)}
+@media print{body{background:#fff}.page{margin:0;box-shadow:none;page-break-after:always;width:auto;min-height:auto}.page:last-child{page-break-after:auto}.toolbar{display:none!important}}
+.toolbar{position:fixed;top:14px;right:14px;z-index:99;display:flex;gap:8px}
+.toolbar button{cursor:pointer;font-family:inherit;font-weight:700;font-size:13px;padding:11px 22px;border-radius:999px;border:none;background:var(--accent);color:#fff;box-shadow:0 6px 18px rgba(214,69,131,.35)}
+.toolbar button.gh{background:#fff;color:var(--ink);border:1px solid var(--line)}
+.rep-hd{display:flex;align-items:flex-end;justify-content:space-between;border-bottom:3px solid var(--accent);padding-bottom:4mm;margin-bottom:6mm}
+.rep-hd .l .brand{font-family:'Inter';font-weight:800;font-size:13pt;color:var(--accent);letter-spacing:.06em}
+.rep-hd .l h1{font-size:17pt;font-weight:900;letter-spacing:.02em}
+.rep-hd .r{text-align:right;font-size:8pt;color:var(--muted);line-height:1.7}
+.rep-hd .r b{font-size:11pt;color:var(--ink)}
+h2{font-size:11.5pt;font-weight:900;margin:7mm 0 3mm;display:flex;align-items:center;gap:6px}
+h2::before{content:'';width:3.5mm;height:3.5mm;background:var(--accent);border-radius:1mm}
+.kpi4{display:grid;grid-template-columns:repeat(4,1fr);gap:3mm}
+.kpi{border:1px solid var(--line);border-radius:3mm;padding:4mm 5mm;position:relative;overflow:hidden}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:1.2mm;background:linear-gradient(90deg,var(--accent),var(--gold))}
+.kpi .l2{font-size:7pt;color:var(--muted);font-weight:700;letter-spacing:.04em}
+.kpi .v{font-family:'Inter';font-size:14.5pt;font-weight:800;letter-spacing:-.01em;line-height:1.3}
+.kpi .d{font-size:7.5pt;font-weight:700}
+.kpi .d.up{color:var(--green)}.kpi .d.dn{color:var(--red)}.kpi .d.fl{color:var(--muted)}
+.bars{display:flex;align-items:flex-end;gap:1px;height:34mm;border-bottom:1px solid var(--line);padding-top:3mm}
+.bars div{flex:1;background:var(--accent);border-radius:1mm 1mm 0 0;min-height:.5mm;opacity:.85}
+.bars-lb{display:flex;gap:1px;font-size:5.5pt;color:var(--muted);margin-top:1mm}
+.bars-lb div{flex:1;text-align:center;overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:8pt}
+th,td{border-bottom:1px solid var(--line);padding:2mm 2.5mm;text-align:left}
+th{background:#f7f7fa;font-size:7pt;color:var(--body);font-weight:700;white-space:nowrap}
+td.n{text-align:right;font-family:'Inter';font-weight:600}
+.pill{display:inline-block;font-size:6.5pt;font-weight:800;padding:.5mm 2.5mm;border-radius:99px}
+.pill.ok{background:#f0fdf4;color:var(--green)}.pill.wa{background:#fffbeb;color:var(--amber)}.pill.ng{background:#fef2f2;color:var(--red)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:5mm}
+.box{border:1px solid var(--line);border-radius:3mm;padding:4mm 5mm}
+.box .bt{font-size:8pt;font-weight:800;margin-bottom:1.5mm}
+.box .bv{font-family:'Inter';font-size:13pt;font-weight:800;color:var(--accent)}
+.box p{font-size:7.5pt;color:var(--body);line-height:1.7}
+.insights{display:flex;flex-direction:column;gap:2mm}
+.ins{display:flex;gap:3mm;font-size:8.5pt;color:var(--body);line-height:1.75;background:#fafafa;border-radius:2.5mm;padding:3mm 4mm;border-left:1mm solid var(--accent)}
+.ins.warn{border-left-color:var(--amber);background:#fffdf5}
+.ins.bad{border-left-color:var(--red);background:#fffafa}
+.ins.good{border-left-color:var(--green);background:#f8fdf9}
+.ins b{color:var(--ink)}
+.acts{counter-reset:act}
+.act{display:flex;gap:4mm;align-items:flex-start;padding:3.5mm 4mm;border:1px solid var(--line);border-radius:3mm;margin-bottom:2.5mm}
+.act::before{counter-increment:act;content:counter(act);flex-shrink:0;width:7mm;height:7mm;border-radius:50%;background:var(--accent);color:#fff;font-family:'Inter';font-weight:800;font-size:9pt;display:flex;align-items:center;justify-content:center}
+.act .at{font-size:9pt;font-weight:800;margin-bottom:.5mm}
+.act p{font-size:7.5pt;color:var(--body);line-height:1.7}
+.memo{border:1px dashed var(--line);border-radius:3mm;padding:4mm 5mm;min-height:22mm;font-size:8.5pt;color:var(--body);line-height:1.9;outline:none}
+.memo:empty::before{content:'（担当者コメント — ここをクリックして入力。印刷時もこのまま出力されます）';color:#c0c0c8}
+.rep-ft{position:absolute;bottom:8mm;left:16mm;right:16mm;display:flex;justify-content:space-between;font-size:6.5pt;color:var(--muted);border-top:1px solid var(--line);padding-top:2mm}
+#loading{text-align:center;padding:40mm 0;color:var(--muted);font-size:11pt}
+</style></head><body>
+
+<div class="toolbar">
+  <button class="gh" onclick="history.back()">← 戻る</button>
+  <button onclick="window.print()">🖨 印刷 / PDF保存</button>
+</div>
+
+<div id="loading" class="page"><div>📊 レポートを生成中…</div></div>
+<div id="rep" style="display:none"></div>
+
+<script>
+const qs=new URLSearchParams(location.search);
+const S=qs.get('store_id')||'1', Y=parseInt(qs.get('year')), M=parseInt(qs.get('month'));
+const pm = M===1 ? {y:Y-1,m:12} : {y:Y,m:M-1};
+const tk=sessionStorage.getItem('pos_token')||'';
+const api=p=>fetch(p,{headers:{'X-Role':'owner','X-Token':tk}}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()});
+const yen=v=>'¥'+Math.round(v||0).toLocaleString();
+const pct=v=>(v||0).toFixed(1)+'%';
+const esc=s=>{const d=document.createElement('div');d.textContent=s||'';return d.innerHTML};
+function delta(cur,prv){
+  if(!prv) return {cls:'fl',txt:'前月データなし'};
+  const d=(cur-prv)/prv*100;
+  if(Math.abs(d)<0.05) return {cls:'fl',txt:'前月比 ±0%'};
+  return {cls:d>0?'up':'dn',txt:'前月比 '+(d>0?'+':'')+d.toFixed(1)+'%'};
+}
+
+async function main(){
+  const [cur,prv,cast,rep,hm]=await Promise.all([
+    api(`/management/store-analytics?store_id=${S}&year=${Y}&month=${M}`),
+    api(`/management/store-analytics?store_id=${S}&year=${pm.y}&month=${pm.m}`).catch(()=>null),
+    api(`/management/cast-performance?store_id=${S}&year=${Y}&month=${M}`),
+    api(`/management/repeat-analysis?store_id=${S}&year=${Y}&month=${M}`),
+    api(`/management/heatmap?store_id=${S}&year=${Y}&month=${M}`).catch(()=>({heatmap:[]})),
+  ]);
+  const casts=(cast.casts||[]).slice();
+  const dows=['月','火','水','木','金','土','日'];
+
+  /* --- ヒートマップ: ピーク帯トップ3 --- */
+  const slots=[];
+  (hm.heatmap||[]).forEach((row,i)=>{Object.entries(row.hours||{}).forEach(([h,v])=>{if(v>0)slots.push({d:dows[i],h:+h,v})});});
+  slots.sort((a,b)=>b.v-a.v);
+  const peak3=slots.slice(0,3);
+
+  /* --- 自動所見（ルールベース） --- */
+  const ins=[]; const acts=[];
+  const dRev=prv?(cur.total_revenue-prv.total_revenue)/Math.max(prv.total_revenue,1)*100:null;
+  if(dRev!==null){
+    if(dRev>=10) ins.push({c:'good',t:`<b>売上は前月比 +${dRev.toFixed(1)}%</b>。好調です。この月に実施した施策（イベント・SNS投稿など）を記録し、再現できる形にしましょう。`});
+    else if(dRev<=-10) ins.push({c:'bad',t:`<b>売上は前月比 ${dRev.toFixed(1)}%</b>。下のアクション候補から優先的に着手することを推奨します。`});
+    else ins.push({c:'',t:`売上は前月比 ${dRev>0?'+':''}${dRev.toFixed(1)}% と<b>横ばい</b>。現状維持の力はあるので、単価アップ施策の上乗せが効きます。`});
+  }
+  const avgPR=casts.length?casts.reduce((a,c)=>a+c.pay_rate,0)/casts.length:0;
+  const highPR=casts.filter(c=>c.pay_rate>50);
+  if(highPR.length) ins.push({c:'bad',t:`<b>給率50%超のキャストが${highPR.length}名</b>（${esc(highPR.slice(0,3).map(c=>c.cast_name).join('、'))}${highPR.length>3?' ほか':''}）。バック設定と本人の売上貢献のバランス見直しを推奨します。`});
+  else if(avgPR>0) ins.push({c:'good',t:`平均給率は <b>${pct(avgPR)}</b> と健全な水準です。`});
+  if(casts.length&&casts[0].revenue_share>35) ins.push({c:'warn',t:`売上の <b>${pct(casts[0].revenue_share)}</b> が ${esc(casts[0].cast_name)} さん1名に集中。退店リスクに備え、2番手の指名育成を進めましょう。`});
+  if(rep.repeat_rate<30) ins.push({c:'warn',t:`リピート率 <b>${pct(rep.repeat_rate)}</b> は改善余地が大きい水準。新規は来ているので、再来店の導線（連絡先取得→ポイントメール）が課題です。`});
+  else if(rep.repeat_rate>=50) ins.push({c:'good',t:`リピート率 <b>${pct(rep.repeat_rate)}</b> は強みです。常連の客単価アップ（ボトル・イベント）に伸びしろがあります。`});
+  if(rep.avg_repeat_spent>0&&rep.avg_new_spent>0){
+    const r=rep.avg_repeat_spent/rep.avg_new_spent;
+    if(r>1.3) ins.push({c:'',t:`リピーター客単価（${yen(rep.avg_repeat_spent)}）は新規（${yen(rep.avg_new_spent)}）の<b>約${r.toFixed(1)}倍</b>。1人を常連化する価値が数字で出ています。`});
+  }
+  if(peak3.length) ins.push({c:'',t:`来客ピークは <b>${peak3.map(p=>`${p.d}曜${p.h}時`).join('、')}</b>。この時間帯にエースキャストのシフトを集中させると指名効率が上がります。`});
+  const zeroDays=(cur.daily||[]).filter(x=>!x.revenue).length;
+  if(zeroDays>=8) ins.push({c:'warn',t:`売上ゼロの日が <b>${zeroDays}日</b> あります。定休日以外で空いている曜日があれば、曜日イベントの導入を検討。`});
+
+  /* --- アクション候補（優先度順に3つ） --- */
+  if(highPR.length) acts.push({t:'給率の高いキャストのバック設計を見直す',p:`対象: ${esc(highPR.slice(0,3).map(c=>c.cast_name).join('、'))}。固定バック額や時給とのバランスを再計算し、本人と面談のうえ合意を取る。`});
+  if(rep.repeat_rate<40) acts.push({t:'再来店の導線をつくる',p:'会計時に連絡先（LINE/メール）を取得する声かけを徹底し、来店後3日以内にお礼メッセージ＋次回特典を送る運用を開始する。'});
+  if(casts.length&&casts[0].revenue_share>35) acts.push({t:'2番手キャストの指名を育てる',p:`${esc(casts[1]?casts[1].cast_name:'2番手')} さんを集中支援：SNSでの露出を増やし、フリー客を優先的に付ける。`});
+  if(dRev!==null&&dRev<0) acts.push({t:'客単価アップ（ボトル提案の型化）',p:'2杯目のタイミングでボトルを提案するトークをキャスト全員に共有。提案して成約したらインセンティブを付ける。'});
+  acts.push({t:'ピーク帯にシフトを寄せる',p:peak3.length?`${peak3.map(p=>`${p.d}曜${p.h}時`).join('、')} に在籍数を厚くし、閑散帯は最小人数で回す。`:'ヒートマップを参考に、混雑時間帯へ人員を集中させる。'});
+  acts.push({t:'顧客台帳のメモを充実させる',p:'好み・記念日・前回の話題を会計後30秒で記録する習慣をつくり、次回来店時の接客に活かす。'});
+  const acts3=acts.slice(0,3);
+
+  /* --- 描画 --- */
+  const maxD=Math.max(...(cur.daily||[]).map(x=>x.revenue),1);
+  const top5=casts.slice(0,5);
+  const issue=new Date();
+  document.getElementById('rep').innerHTML=`
+<div class="page">
+  <div class="rep-hd">
+    <div class="l"><div class="brand">NEXUS</div><h1>月次レポート ${Y}年${M}月</h1></div>
+    <div class="r">店舗ID: ${esc(S)}<br>発行日: ${issue.getFullYear()}/${issue.getMonth()+1}/${issue.getDate()}<br><b>CONFIDENTIAL</b></div>
+  </div>
+
+  <h2>サマリー</h2>
+  <div class="kpi4">
+    <div class="kpi"><div class="l2">月間売上</div><div class="v">${yen(cur.total_revenue)}</div><div class="d ${delta(cur.total_revenue,prv&&prv.total_revenue).cls}">${delta(cur.total_revenue,prv&&prv.total_revenue).txt}</div></div>
+    <div class="kpi"><div class="l2">来店組数</div><div class="v">${cur.session_count}<span style="font-size:8pt;color:var(--muted)"> 組</span></div><div class="d ${delta(cur.session_count,prv&&prv.session_count).cls}">${delta(cur.session_count,prv&&prv.session_count).txt}</div></div>
+    <div class="kpi"><div class="l2">客単価</div><div class="v">${yen(cur.avg_per_guest)}</div><div class="d ${delta(cur.avg_per_guest,prv&&prv.avg_per_guest).cls}">${delta(cur.avg_per_guest,prv&&prv.avg_per_guest).txt}</div></div>
+    <div class="kpi"><div class="l2">組単価</div><div class="v">${yen(cur.avg_per_group)}</div><div class="d ${delta(cur.avg_per_group,prv&&prv.avg_per_group).cls}">${delta(cur.avg_per_group,prv&&prv.avg_per_group).txt}</div></div>
+  </div>
+
+  <h2>日別売上推移</h2>
+  <div class="bars">${(cur.daily||[]).map(x=>`<div style="height:${Math.max(2,x.revenue/maxD*100)}%" title="${x.date}"></div>`).join('')}</div>
+  <div class="bars-lb">${(cur.daily||[]).map(x=>`<div>${+x.date.slice(8)}</div>`).join('')}</div>
+
+  <h2>キャスト成績（売上貢献 上位5名）</h2>
+  <table>
+    <thead><tr><th>#</th><th>名前</th><th>出勤</th><th>本指名</th><th>場内</th><th>同伴</th><th>売上貢献</th><th>総支給</th><th>給率</th></tr></thead>
+    <tbody>${top5.map((c,i)=>`<tr>
+      <td>${i+1}</td><td><b>${esc(c.cast_name)}</b></td>
+      <td class="n">${c.attendance_days}日</td><td class="n">${c.hon_count}</td><td class="n">${c.jyonai_count}</td><td class="n">${c.dohan_count}</td>
+      <td class="n">${yen(c.cast_revenue)}</td><td class="n">${yen(c.total_pay)}</td>
+      <td class="n"><span class="pill ${c.pay_rate>50?'ng':c.pay_rate>35?'wa':'ok'}">${pct(c.pay_rate)}</span></td>
+    </tr>`).join('')||'<tr><td colspan="9" style="color:var(--muted)">データなし</td></tr>'}</tbody>
+  </table>
+
+  <h2>リピート・混雑分析</h2>
+  <div class="two">
+    <div class="box"><div class="bt">🔁 リピート率</div><div class="bv">${pct(rep.repeat_rate)}</div>
+      <p>新規 ${rep.new_count}名 ／ リピーター ${rep.repeat_count}名<br>客単価: 新規 ${yen(rep.avg_new_spent)} ／ リピ ${yen(rep.avg_repeat_spent)}</p></div>
+    <div class="box"><div class="bt">🔥 来客ピーク帯</div><div class="bv" style="font-size:11pt">${peak3.length?peak3.map(p=>`${p.d}曜${p.h}時`).join(' / '):'データなし'}</div>
+      <p>ピーク帯への人員集中が指名効率を高めます。</p></div>
+  </div>
+
+  <div class="rep-ft"><span>NEXUS 月次レポート — POSデータに基づき自動生成</span><span>1 / 2</span></div>
+</div>
+
+<div class="page">
+  <div class="rep-hd">
+    <div class="l"><div class="brand">NEXUS</div><h1>所見とアクションプラン</h1></div>
+    <div class="r">${Y}年${M}月分<br><b>CONFIDENTIAL</b></div>
+  </div>
+
+  <h2>今月の所見（自動分析）</h2>
+  <div class="insights">${ins.map(x=>`<div class="ins ${x.c}"><span>${x.t}</span></div>`).join('')||'<div class="ins">データが不足しています。</div>'}</div>
+
+  <h2>来月のアクション候補（優先度順）</h2>
+  <div class="acts">${acts3.map(a=>`<div class="act"><div><div class="at">${a.t}</div><p>${a.p}</p></div></div>`).join('')}</div>
+
+  <h2>担当者コメント</h2>
+  <div class="memo" contenteditable="true"></div>
+
+  <div class="rep-ft"><span>NEXUS 月次レポート — POSデータに基づき自動生成</span><span>2 / 2</span></div>
+</div>`;
+  document.getElementById('loading').style.display='none';
+  document.getElementById('rep').style.display='block';
+  document.title=`月次レポート_${Y}年${M}月_NEXUS`;
+}
+main().catch(e=>{document.getElementById('loading').innerHTML='⚠ データ取得に失敗しました（'+e.message+'）。<br>分析ページから開き直してください。'});
 </script>
 </body></html>
 """)
